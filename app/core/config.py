@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 class Settings(BaseSettings):
     MONGODB_URL: str = os.getenv("MONGODB_URL", "")
     DATABASE_NAME: str = os.getenv("DATABASE_NAME", "")
+    ENVIRONMENT: str
+    CORS_ORIGINS: str
 
     model_config = SettingsConfigDict(
         env_file=".env",
