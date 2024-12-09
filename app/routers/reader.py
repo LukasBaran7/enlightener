@@ -184,6 +184,15 @@ class ArticleService:
         
         return all_dates
 
+    async def get_collection_counts(self) -> Dict[str, int]:
+        """Get total counts for archived and later collections"""
+        archived_count = await self.db.archived.count_documents({})
+        later_count = await self.db.later.count_documents({})
+        return {
+            "archived_count": archived_count,
+            "later_count": later_count
+        }
+
 def process_mongodb_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
     """Process MongoDB document to handle ObjectId and other special types"""
     # Convert ObjectId to string
@@ -321,4 +330,19 @@ async def get_later_daily_counts(
         raise HTTPException(
             status_code=500,
             detail=f"Error retrieving daily later article counts: {str(e)}"
+        )
+
+@router.get("/counts")
+async def get_total_counts(
+    db: AsyncIOMotorDatabase = Depends(get_database)
+):
+    """Get total count of articles in archived and later collections"""
+    try:
+        article_service = ArticleService(db)
+        counts = await article_service.get_collection_counts()
+        return counts
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving collection counts: {str(e)}"
         )
