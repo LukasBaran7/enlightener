@@ -3,7 +3,7 @@ from fastapi import Depends, HTTPException
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import logging
-from typing import Optional
+from typing import Optional, List
 import os
 from dotenv import load_dotenv
 
@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     DATABASE_NAME: str = os.getenv("DATABASE_NAME", "")
     ENVIRONMENT: str
     CORS_ORIGINS: str
+
+    @property
+    def CORS_ORIGINS_LIST(self) -> List[str]:
+        return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
 
     model_config = SettingsConfigDict(
         env_file=".env",
