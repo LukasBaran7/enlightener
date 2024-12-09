@@ -1,25 +1,76 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
-from typing import List, Optional
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+from typing import List, Optional, Dict, Any
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.models.article import Article
 from app.core.config import get_database
 from bson import ObjectId
-import json
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo  # For proper timezone handling
+from zoneinfo import ZoneInfo
 
 router = APIRouter(
     prefix="/reader",
     tags=["reader"]
 )
 
-def convert_objectid(obj):
-    """Convert ObjectId to string in MongoDB document"""
-    if isinstance(obj, ObjectId):
-        return str(obj)
-    return obj
+class ArticleQueryBuilder:
+    def __init__(self):
+        self.query: Dict[str, Any] = {}
 
-def process_mongodb_doc(doc):
+    def add_search_filter(self, search: Optional[str]) -> 'ArticleQueryBuilder':
+        if search:
+            self.query["$or"] = [
+                {"title": {"$regex": search, "$options": "i"}},
+                {"summary": {"$regex": search, "$options": "i"}}
+            ]
+        return self
+
+    def add_date_filter(self, days: Optional[int]) -> 'ArticleQueryBuilder':
+        if days:
+            date_threshold = datetime.now(ZoneInfo("UTC")) - timedelta(days=days)
+            self.query["updated_at"] = {
+                "$gte": date_threshold.strftime("%Y-%m-%dT%H:%M:%S.%f+00:00")
+            }
+        return self
+
+    def build(self) -> Dict[str, Any]:
+        return self.query
+
+class ArticleService:
+    def __init__(self, db: AsyncIOMotorDatabase):
+        self.db = db
+
+    async def get_articles_count(self, query: Dict[str, Any]) -> int:
+        return await self.db.archived.count_documents(query)
+
+    def get_sort_direction(self, order: str) -> int:
+        return -1 if order == "desc" else 1
+
+    async def fetch_articles(
+        self,
+        query: Dict[str, Any],
+        sort_by: str,
+        sort_direction: int,
+        skip: Optional[int] = None,
+        limit: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        cursor = self.db.archived.find(query).sort(sort_by, sort_direction)
+        
+        if skip is not None and limit is not None:
+            cursor = cursor.skip(skip).limit(limit)
+            
+        return await cursor.to_list(length=None)
+
+    async def get_article_by_id(self, article_id: str) -> Dict[str, Any]:
+        if not ObjectId.is_valid(article_id):
+            raise HTTPException(status_code=400, detail="Invalid article ID format")
+
+        article = await self.db.archived.find_one({"_id": ObjectId(article_id)})
+        if not article:
+            raise HTTPException(status_code=404, detail="Article not found")
+        
+        return process_mongodb_doc(article)
+
+def process_mongodb_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
     """Process MongoDB document to handle ObjectId and other special types"""
     if doc.get('_id'):
         doc['_id'] = str(doc['_id'])
@@ -35,46 +86,35 @@ async def get_articles(
     days: Optional[int] = Query(default=None, description="Get articles from last N days"),
     db: AsyncIOMotorDatabase = Depends(get_database)
 ):
-    """
-    Retrieve articles from the archived collection with pagination and sorting
-    """
+    """Retrieve articles from the archived collection with pagination and sorting"""
     try:
-        # Build the query
-        query = {}
-        if search:
-            query["$or"] = [
-                {"title": {"$regex": search, "$options": "i"}},
-                {"summary": {"$regex": search, "$options": "i"}}
-            ]
+        article_service = ArticleService(db)
         
-        # Add date filter if days parameter is provided
-        if days:
-            # Use UTC for consistency with MongoDB
-            date_threshold = datetime.now(ZoneInfo("UTC")) - timedelta(days=days)
-            # Format date to match MongoDB string format: "2024-12-01T22:35:07.522248+00:00"
-            query["updated_at"] = {
-                "$gte": date_threshold.strftime("%Y-%m-%dT%H:%M:%S.%f+00:00")
-            }
+        # Build query using builder pattern
+        query = (ArticleQueryBuilder()
+                .add_search_filter(search)
+                .add_date_filter(days)
+                .build())
 
-        # Log the query for debugging
-        print(f"MongoDB Query: {query}")
+        # Get total count and sort direction
+        total_count = await article_service.get_articles_count(query)
+        sort_direction = article_service.get_sort_direction(order)
+
+        # Determine if we should use pagination
+        use_pagination = not (days and days <= 14 and total_count <= 100)
         
-        # Sort direction
-        sort_direction = -1 if order == "desc" else 1
+        # Fetch articles
+        articles = await article_service.fetch_articles(
+            query=query,
+            sort_by=sort_by,
+            sort_direction=sort_direction,
+            skip=skip if use_pagination else None,
+            limit=limit if use_pagination else None
+        )
         
-        # Get total count for pagination
-        total_count = await db.archived.count_documents(query)
-        print(f"Total matching documents: {total_count}")
-        
-        # Execute query with pagination and sorting
-        cursor = db.archived.find(query)
-        cursor = cursor.sort(sort_by, sort_direction).skip(skip).limit(limit)
-        
-        # Convert to list and process documents
-        articles = await cursor.to_list(length=None)
         processed_articles = [process_mongodb_doc(doc) for doc in articles]
-        
         print(f"Returned articles count: {len(processed_articles)}")
+        
         return processed_articles
 
     except Exception as e:
@@ -85,20 +125,14 @@ async def get_articles(
         )
 
 @router.get("/articles/{article_id}", response_model=Article)
-async def get_article(article_id: str, db: AsyncIOMotorDatabase = Depends(get_database)):
-    """
-    Retrieve a specific article by ID from archived collection
-    """
+async def get_article(
+    article_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_database)
+):
+    """Retrieve a specific article by ID from archived collection"""
     try:
-        if not ObjectId.is_valid(article_id):
-            raise HTTPException(status_code=400, detail="Invalid article ID format")
-
-        article = await db.archived.find_one({"_id": ObjectId(article_id)})
-        if not article:
-            raise HTTPException(status_code=404, detail="Article not found")
-        
-        return process_mongodb_doc(article)
-
+        article_service = ArticleService(db)
+        return await article_service.get_article_by_id(article_id)
     except HTTPException:
         raise
     except Exception as e:
