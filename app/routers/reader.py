@@ -70,10 +70,39 @@ class ArticleService:
         
         return process_mongodb_doc(article)
 
+    async def get_random_articles(self, collection_name: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Fetch random articles from specified collection"""
+        # Using MongoDB's aggregation pipeline with $sample operator
+        pipeline = [
+            {"$sample": {"size": limit}}
+        ]
+        cursor = self.db[collection_name].aggregate(pipeline)
+        return await cursor.to_list(length=None)
+
 def process_mongodb_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
     """Process MongoDB document to handle ObjectId and other special types"""
+    # Convert ObjectId to string
     if doc.get('_id'):
         doc['_id'] = str(doc['_id'])
+    
+    # Set default values for required fields if they're missing or None
+    if 'word_count' not in doc or doc['word_count'] is None:
+        doc['word_count'] = 0
+    
+    # Ensure other required fields have default values
+    if 'title' not in doc:
+        doc['title'] = ''
+    if 'url' not in doc:
+        doc['url'] = ''
+    if 'summary' not in doc:
+        doc['summary'] = ''
+    if 'site_name' not in doc or doc['site_name'] is None:
+        doc['site_name'] = ''
+    if 'created_at' not in doc:
+        doc['created_at'] = datetime.now(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.%f+00:00")
+    if 'updated_at' not in doc:
+        doc['updated_at'] = datetime.now(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.%f+00:00")
+    
     return doc
 
 @router.get("/articles", response_model=List[Article])
@@ -139,4 +168,20 @@ async def get_article(
         raise HTTPException(
             status_code=500,
             detail=f"Error retrieving article: {str(e)}"
+        )
+
+@router.get("/random-later", response_model=List[Article])
+async def get_random_later_articles(
+    db: AsyncIOMotorDatabase = Depends(get_database)
+):
+    """Retrieve 5 random articles from the 'later' collection"""
+    try:
+        article_service = ArticleService(db)
+        articles = await article_service.get_random_articles("later")
+        processed_articles = [process_mongodb_doc(doc) for doc in articles]
+        return processed_articles
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving random articles: {str(e)}"
         )
