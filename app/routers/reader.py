@@ -6,6 +6,7 @@ from app.core.config import get_database
 from bson import ObjectId
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from collections import defaultdict
 
 router = APIRouter(
     prefix="/reader",
@@ -79,6 +80,59 @@ class ArticleService:
         cursor = self.db[collection_name].aggregate(pipeline)
         return await cursor.to_list(length=None)
 
+    async def get_daily_article_counts(self, days: int = 7) -> List[Dict[str, Any]]:
+        """Get count of articles read per day for the last N days"""
+        # Calculate date threshold
+        end_date = datetime.now(ZoneInfo("UTC"))
+        start_date = end_date - timedelta(days=days)
+        
+        # Create aggregation pipeline
+        pipeline = [
+            {
+                "$match": {
+                    "updated_at": {
+                        "$gte": start_date.strftime("%Y-%m-%dT%H:%M:%S.%f+00:00"),
+                        "$lte": end_date.strftime("%Y-%m-%dT%H:%M:%S.%f+00:00")
+                    },
+                    # Exclude newsletters by checking category
+                    "category": {"$ne": "email"}
+                }
+            },
+            {
+                "$group": {
+                    "_id": {
+                        "$substr": ["$updated_at", 0, 10]  # Group by date (YYYY-MM-DD)
+                    },
+                    "count": {"$sum": 1}
+                }
+            },
+            {
+                "$sort": {"_id": 1}  # Sort by date ascending
+            }
+        ]
+        
+        # Execute aggregation
+        cursor = self.db.archived.aggregate(pipeline)
+        results = await cursor.to_list(length=None)
+        
+        # Fill in missing dates with zero counts
+        date_counts = defaultdict(int)
+        for result in results:
+            date_counts[result["_id"]] = result["count"]
+        
+        # Generate all dates in range
+        all_dates = []
+        current_date = start_date
+        while current_date <= end_date:
+            date_str = current_date.strftime("%Y-%m-%d")
+            all_dates.append({
+                "date": date_str,
+                "count": date_counts[date_str]
+            })
+            current_date += timedelta(days=1)
+        
+        return all_dates
+
 def process_mongodb_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
     """Process MongoDB document to handle ObjectId and other special types"""
     # Convert ObjectId to string
@@ -151,6 +205,22 @@ async def get_articles(
         raise HTTPException(
             status_code=500,
             detail=f"Error retrieving articles: {str(e)}"
+        )
+
+@router.get("/articles/daily-counts")
+async def get_daily_article_counts(
+    days: int = Query(default=7, ge=1, le=30, description="Number of days to look back"),
+    db: AsyncIOMotorDatabase = Depends(get_database)
+):
+    """Get count of articles read per day for the specified number of days"""
+    try:
+        article_service = ArticleService(db)
+        daily_counts = await article_service.get_daily_article_counts(days)
+        return daily_counts
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving daily article counts: {str(e)}"
         )
 
 @router.get("/articles/{article_id}", response_model=Article)
