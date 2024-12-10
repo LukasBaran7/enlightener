@@ -270,6 +270,98 @@ class ArticleService:
             "later_count": later_count
         }
 
+    async def get_curated_articles(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Get curated articles in different sections"""
+        two_hours_ago = datetime.now(ZoneInfo("UTC")) - timedelta(hours=2)
+        recently_shown = await self.db.to_read.find({
+            "shown_at": {
+                "$gte": two_hours_ago.strftime("%Y-%m-%dT%H:%M:%S.%f+00:00")
+            }
+        }).distinct("article_id")
+
+        # Get quick reads
+        quick_reads_pipeline = [
+            {
+                "$match": {
+                    "_id": {"$nin": recently_shown},
+                    "word_count": {"$lt": 1000},
+                    "word_count": {"$gt": 0}
+                }
+            },
+            {"$sample": {"size": 4}}
+        ]
+
+        # Get old articles (2020 and older)
+        archive_pipeline = [
+            {
+                "$match": {
+                    "_id": {"$nin": recently_shown},
+                    "saved_at": {
+                        "$lt": "2021-01-01T00:00:00.000+00:00"  # Articles before 2021
+                    }
+                }
+            },
+            {
+                "$sort": {"saved_at": -1}  # Sort by saved_at descending
+            },
+            {"$sample": {"size": 4}}  # Get 4 random old articles
+        ]
+
+        # Get most common sites
+        common_sites_pipeline = [
+            {
+                "$group": {
+                    "_id": "$site_name",
+                    "count": {"$sum": 1}
+                }
+            },
+            {"$sort": {"count": -1}},
+            {"$limit": 5}
+        ]
+        
+        common_sites = await self.db.later.aggregate(common_sites_pipeline).to_list(length=None)
+        common_site_names = [site["_id"] for site in common_sites if site["_id"]]
+
+        # Get articles from favorite sources
+        favorite_sources_pipeline = [
+            {
+                "$match": {
+                    "_id": {"$nin": recently_shown},
+                    "site_name": {"$in": common_site_names}
+                }
+            },
+            {"$sample": {"size": 3}}
+        ]
+
+        # Execute all pipelines
+        quick_reads = await self.db.later.aggregate(quick_reads_pipeline).to_list(length=None)
+        archive_articles = await self.db.later.aggregate(archive_pipeline).to_list(length=None)
+        favorite_sources = await self.db.later.aggregate(favorite_sources_pipeline).to_list(length=None)
+
+        # Record all returned articles as recently shown
+        all_articles = quick_reads + archive_articles + favorite_sources
+        if all_articles:
+            now = datetime.now(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.%f+00:00")
+            await self.db.to_read.insert_many([
+                {
+                    "article_id": article["_id"],
+                    "shown_at": now
+                } for article in all_articles
+            ])
+
+        # Clean up old entries
+        await self.db.to_read.delete_many({
+            "shown_at": {
+                "$lt": two_hours_ago.strftime("%Y-%m-%dT%H:%M:%S.%f+00:00")
+            }
+        })
+
+        return {
+            "quick_reads": [process_mongodb_doc(doc) for doc in quick_reads],
+            "from_archives": [process_mongodb_doc(doc) for doc in archive_articles],
+            "favorite_sources": [process_mongodb_doc(doc) for doc in favorite_sources]
+        }
+
 def process_mongodb_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
     """Process MongoDB document to handle ObjectId and other special types"""
     # Convert ObjectId to string
@@ -422,4 +514,19 @@ async def get_total_counts(
         raise HTTPException(
             status_code=500,
             detail=f"Error retrieving collection counts: {str(e)}"
+        )
+
+@router.get("/later/curated")
+async def get_curated_later_articles(
+    db: AsyncIOMotorDatabase = Depends(get_database)
+):
+    """Get curated articles from the 'later' collection in different sections"""
+    try:
+        article_service = ArticleService(db)
+        curated_articles = await article_service.get_curated_articles()
+        return curated_articles
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving curated articles: {str(e)}"
         )
