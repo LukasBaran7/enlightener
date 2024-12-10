@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 class Settings(BaseSettings):
     MONGODB_URL: str = os.getenv("MONGODB_URL", "")
     DATABASE_NAME: str = os.getenv("DATABASE_NAME", "")
+    PODCASTS_DATABASE_NAME: str = os.getenv("PODCASTS_DATABASE_NAME", "podcasts")
     ENVIRONMENT: str
     CORS_ORIGINS: str
 
@@ -59,4 +60,17 @@ async def get_database(settings: Settings = Depends(get_settings)):
         raise HTTPException(
             status_code=500,
             detail="Could not connect to database"
+        ) 
+
+async def get_podcasts_database(settings: Settings = Depends(get_settings)):
+    try:
+        client = AsyncIOMotorClient(settings.MONGODB_URL)
+        # Verify the connection
+        await client.admin.command('ping')
+        return client[settings.PODCASTS_DATABASE_NAME]
+    except Exception as e:
+        logger.error(f"Failed to connect to Podcasts MongoDB: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Could not connect to podcasts database"
         ) 
