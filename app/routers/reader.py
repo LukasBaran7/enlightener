@@ -72,7 +72,7 @@ class ArticleService:
         return process_mongodb_doc(article)
 
     async def get_random_articles(self, collection_name: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """Fetch random articles from specified collection, avoiding recently shown ones"""
+        """Fetch random articles from specified collection, with at least half from before 2020"""
         # First, get IDs of recently shown articles (from last 2 hours)
         two_hours_ago = datetime.now(ZoneInfo("UTC")) - timedelta(hours=2)
         recently_shown = await self.db.to_read.find({
@@ -81,29 +81,64 @@ class ArticleService:
             }
         }).distinct("article_id")
 
-        # Create pipeline to get random articles excluding recently shown ones
-        pipeline = [
+        # Calculate how many old articles we need
+        old_articles_limit = limit // 2
+
+        # Pipeline for old articles (before 2020)
+        old_articles_pipeline = [
             {
                 "$match": {
-                    "_id": {"$nin": recently_shown}
+                    "_id": {"$nin": recently_shown},
+                    "saved_at": {
+                        "$lt": "2020-01-01T00:00:00.000+00:00"
+                    }
                 }
             },
-            {"$sample": {"size": limit}}
+            {"$sample": {"size": old_articles_limit}}
         ]
-        
-        cursor = self.db[collection_name].aggregate(pipeline)
-        articles = await cursor.to_list(length=None)
-        
-        # If we didn't get enough articles, remove the exclusion filter
+
+        # Pipeline for newer articles
+        new_articles_pipeline = [
+            {
+                "$match": {
+                    "_id": {"$nin": recently_shown},
+                    "saved_at": {
+                        "$gte": "2020-01-01T00:00:00.000+00:00"
+                    }
+                }
+            },
+            {"$sample": {"size": limit - old_articles_limit}}
+        ]
+
+        # Get old articles
+        old_cursor = self.db[collection_name].aggregate(old_articles_pipeline)
+        old_articles = await old_cursor.to_list(length=None)
+
+        # Get newer articles
+        new_cursor = self.db[collection_name].aggregate(new_articles_pipeline)
+        new_articles = await new_cursor.to_list(length=None)
+
+        # Combine articles
+        articles = old_articles + new_articles
+
+        # If we didn't get enough articles, fill with random ones without date restriction
         if len(articles) < limit:
             remaining = limit - len(articles)
+            existing_ids = {article["_id"] for article in articles}
             fallback_pipeline = [
+                {
+                    "$match": {
+                        "_id": {
+                            "$nin": list(existing_ids) + recently_shown
+                        }
+                    }
+                },
                 {"$sample": {"size": remaining}}
             ]
             additional_cursor = self.db[collection_name].aggregate(fallback_pipeline)
             additional_articles = await additional_cursor.to_list(length=None)
             articles.extend(additional_articles)
-        
+
         # Record these articles as recently shown
         now = datetime.now(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.%f+00:00")
         await self.db.to_read.insert_many([
@@ -112,14 +147,14 @@ class ArticleService:
                 "shown_at": now
             } for article in articles
         ])
-        
-        # Clean up old entries (optional - you could also use a TTL index)
+
+        # Clean up old entries
         await self.db.to_read.delete_many({
             "shown_at": {
                 "$lt": two_hours_ago.strftime("%Y-%m-%dT%H:%M:%S.%f+00:00")
             }
         })
-        
+
         return articles
 
     async def get_daily_article_counts(self, days: int = 7) -> List[Dict[str, Any]]:
