@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import reader
+from app.routers import reader, podcast
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -21,6 +21,7 @@ app.add_middleware(
 )
 
 app.include_router(reader.router)
+app.include_router(podcast.router)
 
 @app.get("/")
 async def root():
