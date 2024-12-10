@@ -45,7 +45,15 @@ async def get_database(settings: Settings = Depends(get_settings)):
         client = AsyncIOMotorClient(settings.MONGODB_URL)
         # Verify the connection
         await client.admin.command('ping')
-        return client[settings.DATABASE_NAME]
+        db = client[settings.DATABASE_NAME]
+        
+        # Create TTL index on to_read collection
+        await db.to_read.create_index(
+            "shown_at", 
+            expireAfterSeconds=7200  # 2 hours
+        )
+        
+        return db
     except Exception as e:
         logger.error(f"Failed to connect to MongoDB: {str(e)}")
         raise HTTPException(
