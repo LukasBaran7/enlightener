@@ -71,14 +71,56 @@ class ArticleService:
         
         return process_mongodb_doc(article)
 
-    async def get_random_articles(self, collection_name: str, limit: int = 5) -> List[Dict[str, Any]]:
-        """Fetch random articles from specified collection"""
-        # Using MongoDB's aggregation pipeline with $sample operator
+    async def get_random_articles(self, collection_name: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Fetch random articles from specified collection, avoiding recently shown ones"""
+        # First, get IDs of recently shown articles (from last 2 hours)
+        two_hours_ago = datetime.now(ZoneInfo("UTC")) - timedelta(hours=2)
+        recently_shown = await self.db.to_read.find({
+            "shown_at": {
+                "$gte": two_hours_ago.strftime("%Y-%m-%dT%H:%M:%S.%f+00:00")
+            }
+        }).distinct("article_id")
+
+        # Create pipeline to get random articles excluding recently shown ones
         pipeline = [
+            {
+                "$match": {
+                    "_id": {"$nin": recently_shown}
+                }
+            },
             {"$sample": {"size": limit}}
         ]
+        
         cursor = self.db[collection_name].aggregate(pipeline)
-        return await cursor.to_list(length=None)
+        articles = await cursor.to_list(length=None)
+        
+        # If we didn't get enough articles, remove the exclusion filter
+        if len(articles) < limit:
+            remaining = limit - len(articles)
+            fallback_pipeline = [
+                {"$sample": {"size": remaining}}
+            ]
+            additional_cursor = self.db[collection_name].aggregate(fallback_pipeline)
+            additional_articles = await additional_cursor.to_list(length=None)
+            articles.extend(additional_articles)
+        
+        # Record these articles as recently shown
+        now = datetime.now(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.%f+00:00")
+        await self.db.to_read.insert_many([
+            {
+                "article_id": article["_id"],
+                "shown_at": now
+            } for article in articles
+        ])
+        
+        # Clean up old entries (optional - you could also use a TTL index)
+        await self.db.to_read.delete_many({
+            "shown_at": {
+                "$lt": two_hours_ago.strftime("%Y-%m-%dT%H:%M:%S.%f+00:00")
+            }
+        })
+        
+        return articles
 
     async def get_daily_article_counts(self, days: int = 7) -> List[Dict[str, Any]]:
         """Get count of articles read per day for the last N days"""
