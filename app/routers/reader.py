@@ -362,6 +362,29 @@ class ArticleService:
             "favorite_sources": [process_mongodb_doc(doc) for doc in favorite_sources]
         }
 
+    async def get_stats(self, days: int = 7) -> Dict[str, Any]:
+        """Get combined statistics including collection counts and daily counts"""
+        # Get collection counts
+        archived_count = await self.db.archived.count_documents({})
+        later_count = await self.db.later.count_documents({})
+        
+        # Get daily counts for archived articles
+        archived_daily = await self.get_daily_article_counts(days)
+        
+        # Get daily counts for later articles
+        later_daily = await self.get_later_article_counts(days)
+        
+        return {
+            "total_counts": {
+                "archived_count": archived_count,
+                "later_count": later_count
+            },
+            "daily_counts": {
+                "archived": archived_daily,
+                "later": later_daily
+            }
+        }
+
 def process_mongodb_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
     """Process MongoDB document to handle ObjectId and other special types"""
     # Convert ObjectId to string
@@ -436,22 +459,6 @@ async def get_articles(
             detail=f"Error retrieving articles: {str(e)}"
         )
 
-@router.get("/articles/daily-counts")
-async def get_daily_article_counts(
-    days: int = Query(default=7, ge=1, le=30, description="Number of days to look back"),
-    db: AsyncIOMotorDatabase = Depends(get_database)
-):
-    """Get count of articles read per day for the specified number of days"""
-    try:
-        article_service = ArticleService(db)
-        daily_counts = await article_service.get_daily_article_counts(days)
-        return daily_counts
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error retrieving daily article counts: {str(e)}"
-        )
-
 @router.get("/articles/{article_id}", response_model=Article)
 async def get_article(
     article_id: str,
@@ -485,37 +492,6 @@ async def get_random_later_articles(
             detail=f"Error retrieving random articles: {str(e)}"
         )
 
-@router.get("/later/daily-counts")
-async def get_later_daily_counts(
-    days: int = Query(default=7, ge=1, le=30, description="Number of days to look back"),
-    db: AsyncIOMotorDatabase = Depends(get_database)
-):
-    """Get count of articles added to 'later' collection per day for the specified number of days"""
-    try:
-        article_service = ArticleService(db)
-        daily_counts = await article_service.get_later_article_counts(days)
-        return daily_counts
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error retrieving daily later article counts: {str(e)}"
-        )
-
-@router.get("/counts")
-async def get_total_counts(
-    db: AsyncIOMotorDatabase = Depends(get_database)
-):
-    """Get total count of articles in archived and later collections"""
-    try:
-        article_service = ArticleService(db)
-        counts = await article_service.get_collection_counts()
-        return counts
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error retrieving collection counts: {str(e)}"
-        )
-
 @router.get("/later/curated")
 async def get_curated_later_articles(
     db: AsyncIOMotorDatabase = Depends(get_database)
@@ -529,4 +505,20 @@ async def get_curated_later_articles(
         raise HTTPException(
             status_code=500,
             detail=f"Error retrieving curated articles: {str(e)}"
+        )
+
+@router.get("/stats")
+async def get_stats(
+    days: int = Query(default=7, ge=1, le=30, description="Number of days to look back"),
+    db: AsyncIOMotorDatabase = Depends(get_database)
+):
+    """Get combined statistics including collection counts and daily counts"""
+    try:
+        article_service = ArticleService(db)
+        stats = await article_service.get_stats(days)
+        return stats
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving statistics: {str(e)}"
         )
