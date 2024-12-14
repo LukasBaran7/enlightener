@@ -16,3 +16,9 @@ mypy_path = "."
 [[tool.mypy.overrides]]
 module = ["motor.*", "pymongo.*"]
 ignore_missing_imports = true 
+
+[tool.pytest.ini_options]
+pythonpath = [
+    "."
+]
+asyncio_mode = "auto"

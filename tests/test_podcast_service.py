@@ -1,5 +1,5 @@
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from app.routers.podcast import PodcastService, Episode
 from app.repositories.podcast_repository import PodcastRepository
 from unittest.mock import Mock, AsyncMock
@@ -21,7 +21,7 @@ def sample_podcast_data():
         {
             "podcast_title": "Test Podcast",
             "artwork_url": "http://example.com/art.jpg",
-            "created_at": "2024-03-20T10:00:00Z",
+            "created_at": "2024-03-20T10:00:00+00:00",
             "source": "overcast",
             "episodes": [
                 {
@@ -29,9 +29,9 @@ def sample_podcast_data():
                     "audio_url": "http://example.com/ep1.mp3",
                     "overcast_url": "http://overcast.fm/ep1",
                     "overcast_id": "ep1",
-                    "published_date": "2024-03-19T10:00:00Z",
+                    "published_date": "2024-03-19T10:00:00+00:00",
                     "play_progress": 100,
-                    "last_played_at": "2024-03-20T09:00:00Z",
+                    "last_played_at": "2024-03-20T09:00:00+00:00",
                     "summary": "Test summary",
                 },
                 {
@@ -39,9 +39,9 @@ def sample_podcast_data():
                     "audio_url": "http://example.com/ep2.mp3",
                     "overcast_url": "http://overcast.fm/ep2",
                     "overcast_id": "ep2",
-                    "published_date": "2024-03-18T10:00:00Z",
+                    "published_date": "2024-03-18T10:00:00+00:00",
                     "play_progress": 50,
-                    "last_played_at": "2024-03-19T09:00:00Z",
+                    "last_played_at": "2024-03-19T09:00:00+00:00",
                     "summary": "Test summary 2",
                 },
             ],
@@ -80,7 +80,7 @@ def test_process_date_with_valid_string(podcast_service):
 
 def test_process_date_with_datetime(podcast_service):
     # Arrange
-    test_date = datetime(2024, 3, 20, 10, 0, 0, tzinfo=timezone.utc)
+    test_date = datetime(2024, 3, 20, 10, 0, 0, tzinfo=UTC)
 
     # Act
     result = podcast_service.process_date(test_date)
@@ -96,9 +96,9 @@ def test_create_episode_from_doc(podcast_service):
         "audio_url": "http://example.com/test.mp3",
         "overcast_url": "http://overcast.fm/test",
         "overcast_id": "test123",
-        "published_date": "2024-03-20T10:00:00Z",
+        "published_date": "2024-03-20T10:00:00+00:00",
         "play_progress": 50,
-        "last_played_at": "2024-03-20T11:00:00Z",
+        "last_played_at": "2024-03-20T11:00:00+00:00",
         "summary": "Test summary",
     }
 
