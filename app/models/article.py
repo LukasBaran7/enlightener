@@ -2,15 +2,14 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field, ConfigDict
 
+
 class Article(BaseModel):
     """
     Article model that matches MongoDB document structure.
     """
+
     model_config = ConfigDict(
-        populate_by_name=True,
-        json_encoders={
-            datetime: lambda v: v.isoformat()
-        }
+        populate_by_name=True, json_encoders={datetime: lambda v: v.isoformat()}
     )
 
     id: str = Field(default=None, alias="_id")
@@ -26,7 +25,9 @@ class Article(BaseModel):
     word_count: int = Field(..., alias="word_count")
     created_at: datetime
     updated_at: datetime
-    published_date: Optional[int] = Field(None, description="Unix timestamp in milliseconds")
+    published_date: Optional[int] = Field(
+        None, description="Unix timestamp in milliseconds"
+    )
     summary: Optional[str] = None
     image_url: Optional[str] = None
     content: Optional[str] = None

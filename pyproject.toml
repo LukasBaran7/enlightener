@@ -1,0 +1,18 @@
+[tool.black]
+line-length = 88
+target-version = ['py39']
+include = '\.pyi?$'
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "."
+
+[[tool.mypy.overrides]]
+module = ["motor.*", "pymongo.*"]
+ignore_missing_imports = true 
