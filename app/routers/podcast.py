@@ -3,11 +3,14 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.core.config import get_podcasts_database
 from typing import List, Optional, Dict, Any
 import logging
-from datetime import datetime
+from datetime import datetime, UTC
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel
-import dateutil.parser
+
+
 from app.repositories.podcast_repository import PodcastRepository
+import dateutil.parser
+
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -116,10 +119,17 @@ class PodcastService:
             ]
 
             # Sort episodes by last_played_at
+            def parse_date(date_str: Optional[str]) -> datetime:
+                if not date_str:
+                    return datetime.fromtimestamp(0, UTC)
+                try:
+                    # Use fromisoformat instead of dateutil.parser.parse
+                    return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                except ValueError:
+                    return datetime.fromtimestamp(0, UTC)
+
             all_episodes.sort(
-                key=lambda x: dateutil.parser.parse(
-                    x[0].last_played_at or "1970-01-01T00:00:00+00:00"
-                ),
+                key=lambda x: parse_date(x[0].last_played_at),
                 reverse=True,
             )
             latest_episodes = all_episodes[:15]
@@ -128,7 +138,7 @@ class PodcastService:
             podcast_map = {}
             for episode, podcast in latest_episodes:
                 if podcast.podcast_title not in podcast_map:
-                    podcast_map[podcast.podcast_title] = podcast.copy(
+                    podcast_map[podcast.podcast_title] = podcast.model_copy(
                         update={"episodes": []}
                     )
                 podcast_map[podcast.podcast_title].episodes.append(episode)
