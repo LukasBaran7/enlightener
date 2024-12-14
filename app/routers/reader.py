@@ -414,7 +414,7 @@ def process_mongodb_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
 @router.get("/articles", response_model=List[Article])
 async def get_articles(
     skip: int = Query(default=0, ge=0, description="Number of articles to skip"),
-    limit: int = Query(default=20, ge=1, le=100, description="Number of articles to return"),
+    limit: int = Query(default=500, ge=1, le=500, description="Number of articles to return"),
     sort_by: Optional[str] = Query(default="updated_at", description="Field to sort by"),
     order: Optional[str] = Query(default="desc", enum=["asc", "desc"]),
     search: Optional[str] = Query(default=None, description="Search in title and summary"),
