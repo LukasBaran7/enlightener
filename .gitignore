@@ -34,3 +34,10 @@ venv/
 
 # Logs
 *.log 
+
+# Coverage
+.coverage
+coverage.xml
+.pytest_cache/
+*.pyc
+.mypy_cache/

@@ -4,6 +4,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class PodcastRepository:
     def __init__(self, db: AsyncIOMotorDatabase):
         self.db = db
@@ -20,4 +21,4 @@ class PodcastRepository:
 
     async def count_documents(self) -> int:
         """Count documents in the collection"""
-        return await self.collection.count_documents({}) 
+        return await self.collection.count_documents({})

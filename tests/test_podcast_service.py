@@ -1,16 +1,19 @@
 import pytest
 from datetime import datetime, timezone
-from app.routers.podcast import PodcastService, Episode, Podcast
+from app.routers.podcast import PodcastService, Episode
 from app.repositories.podcast_repository import PodcastRepository
 from unittest.mock import Mock, AsyncMock
+
 
 @pytest.fixture
 def mock_repository():
     return Mock(spec=PodcastRepository)
 
+
 @pytest.fixture
 def podcast_service(mock_repository):
     return PodcastService(mock_repository)
+
 
 @pytest.fixture
 def sample_podcast_data():
@@ -29,7 +32,7 @@ def sample_podcast_data():
                     "published_date": "2024-03-19T10:00:00Z",
                     "play_progress": 100,
                     "last_played_at": "2024-03-20T09:00:00Z",
-                    "summary": "Test summary"
+                    "summary": "Test summary",
                 },
                 {
                     "episode_title": "Episode 2",
@@ -39,14 +42,17 @@ def sample_podcast_data():
                     "published_date": "2024-03-18T10:00:00Z",
                     "play_progress": 50,
                     "last_played_at": "2024-03-19T09:00:00Z",
-                    "summary": "Test summary 2"
-                }
-            ]
+                    "summary": "Test summary 2",
+                },
+            ],
         }
     ]
 
+
 @pytest.mark.asyncio
-async def test_get_latest_episodes_happy_path(podcast_service, mock_repository, sample_podcast_data):
+async def test_get_latest_episodes_happy_path(
+    podcast_service, mock_repository, sample_podcast_data
+):
     # Arrange
     mock_repository.find_all = AsyncMock(return_value=sample_podcast_data)
 
@@ -60,6 +66,7 @@ async def test_get_latest_episodes_happy_path(podcast_service, mock_repository, 
     assert result[0].episodes[0].episode_title == "Episode 1"
     assert result[0].episodes[1].episode_title == "Episode 2"
 
+
 def test_process_date_with_valid_string(podcast_service):
     # Arrange
     test_date = "2024-03-20T10:00:00Z"
@@ -69,6 +76,7 @@ def test_process_date_with_valid_string(podcast_service):
 
     # Assert
     assert result == "2024-03-20T10:00:00+00:00"
+
 
 def test_process_date_with_datetime(podcast_service):
     # Arrange
@@ -80,6 +88,7 @@ def test_process_date_with_datetime(podcast_service):
     # Assert
     assert result == "2024-03-20T10:00:00+00:00"
 
+
 def test_create_episode_from_doc(podcast_service):
     # Arrange
     episode_doc = {
@@ -90,7 +99,7 @@ def test_create_episode_from_doc(podcast_service):
         "published_date": "2024-03-20T10:00:00Z",
         "play_progress": 50,
         "last_played_at": "2024-03-20T11:00:00Z",
-        "summary": "Test summary"
+        "summary": "Test summary",
     }
 
     # Act
@@ -100,4 +109,4 @@ def test_create_episode_from_doc(podcast_service):
     assert isinstance(episode, Episode)
     assert episode.episode_title == "Test Episode"
     assert episode.audio_url == "http://example.com/test.mp3"
-    assert episode.play_progress == 50 
+    assert episode.play_progress == 50

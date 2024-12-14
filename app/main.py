@@ -8,7 +8,7 @@ settings = get_settings()
 app = FastAPI(
     title="Reader API",
     description="API for managing articles and reading list",
-    version="1.0.0"
+    version="1.0.0",
 )
 
 # Configure CORS
@@ -23,6 +23,7 @@ app.add_middleware(
 app.include_router(reader.router)
 app.include_router(podcast.router)
 
+
 @app.get("/")
 async def root():
-    return {"message": "Welcome to Reader API"} 
+    return {"message": "Welcome to Reader API"}

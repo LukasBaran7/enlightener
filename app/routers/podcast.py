@@ -12,10 +12,8 @@ from app.repositories.podcast_repository import PodcastRepository
 # Set up logging
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    prefix="/podcasts",
-    tags=["podcasts"]
-)
+router = APIRouter(prefix="/podcasts", tags=["podcasts"])
+
 
 class Episode(BaseModel):
     episode_title: str
@@ -27,12 +25,14 @@ class Episode(BaseModel):
     last_played_at: Optional[str] = None
     summary: str = ""
 
+
 class Podcast(BaseModel):
     podcast_title: str
     artwork_url: str
     episodes: List[Episode]
     created_at: str
     source: str = "overcast"
+
 
 class PodcastService:
     def __init__(self, repository: PodcastRepository):
@@ -42,7 +42,7 @@ class PodcastService:
         """Convert date field to ISO format string"""
         if not date_field:
             return datetime.now(ZoneInfo("UTC")).isoformat()
-        
+
         try:
             if isinstance(date_field, str):
                 # Parse the string date using dateutil for better format support
@@ -64,14 +64,15 @@ class PodcastService:
     def _create_episode(self, episode_doc: Dict[str, Any]) -> Episode:
         """Create Episode model from document"""
         return Episode(
-            episode_title=episode_doc.get("episode_title") or episode_doc.get("title", ""),
+            episode_title=episode_doc.get("episode_title")
+            or episode_doc.get("title", ""),
             audio_url=episode_doc.get("audio_url", ""),
             overcast_url=episode_doc.get("overcast_url", ""),
             overcast_id=episode_doc.get("overcast_id", ""),
             published_date=self.process_date(episode_doc.get("published_date")),
             play_progress=episode_doc.get("play_progress"),
             last_played_at=self.process_date(episode_doc.get("last_played_at")),
-            summary=episode_doc.get("summary", "")
+            summary=episode_doc.get("summary", ""),
         )
 
     def _create_podcast(self, doc: Dict[str, Any], episodes: List[Episode]) -> Podcast:
@@ -81,7 +82,7 @@ class PodcastService:
             artwork_url=doc.get("artwork_url", ""),
             episodes=episodes,
             created_at=self.process_date(doc.get("created_at")),
-            source=doc.get("source", "overcast")
+            source=doc.get("source", "overcast"),
         )
 
     async def get_latest_episodes(self) -> List[Podcast]:
@@ -89,7 +90,7 @@ class PodcastService:
         try:
             podcasts_data = await self.repository.find_all()
             podcasts = []
-            
+
             for doc in podcasts_data:
                 episodes = []
                 for episode_doc in doc.get("episodes", []):
@@ -109,15 +110,17 @@ class PodcastService:
 
             # Get latest episodes across all podcasts
             all_episodes = [
-                (episode, podcast) 
-                for podcast in podcasts 
+                (episode, podcast)
+                for podcast in podcasts
                 for episode in podcast.episodes
             ]
 
             # Sort episodes by last_played_at
             all_episodes.sort(
-                key=lambda x: dateutil.parser.parse(x[0].last_played_at or "1970-01-01T00:00:00+00:00"),
-                reverse=True
+                key=lambda x: dateutil.parser.parse(
+                    x[0].last_played_at or "1970-01-01T00:00:00+00:00"
+                ),
+                reverse=True,
             )
             latest_episodes = all_episodes[:15]
 
@@ -136,40 +139,36 @@ class PodcastService:
             logger.error(f"Error in get_latest_episodes: {str(e)}")
             raise
 
+
 # Update the endpoint dependencies
 def get_podcast_service(
-    db: AsyncIOMotorDatabase = Depends(get_podcasts_database)
+    db: AsyncIOMotorDatabase = Depends(get_podcasts_database),
 ) -> PodcastService:
     repository = PodcastRepository(db)
     return PodcastService(repository)
 
+
 @router.get("/latest", response_model=List[Podcast])
-async def get_latest_episodes(
-    service: PodcastService = Depends(get_podcast_service)
-):
+async def get_latest_episodes(service: PodcastService = Depends(get_podcast_service)):
     """Get the 15 most recently played episodes grouped by podcast"""
     try:
         return await service.get_latest_episodes()
     except Exception as e:
         logger.error(f"Error in get_latest_episodes endpoint: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Error fetching podcasts: {str(e)}"
+            status_code=500, detail=f"Error fetching podcasts: {str(e)}"
         )
+
 
 @router.get("/check")
 async def check_podcast_collection(
-    repository: PodcastRepository = Depends(lambda db=Depends(get_podcasts_database): PodcastRepository(db))
+    repository: PodcastRepository = Depends(
+        lambda db=Depends(get_podcasts_database): PodcastRepository(db)
+    ),
 ):
     """Check if the podcast collection is accessible and contains data"""
     try:
         count = await repository.count_documents()
-        return {
-            "collection_exists": True,
-            "document_count": count
-        }
+        return {"collection_exists": True, "document_count": count}
     except Exception as e:
-        return {
-            "collection_exists": False,
-            "error": str(e)
-        } 
+        return {"collection_exists": False, "error": str(e)}
