@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     PODCASTS_DATABASE_NAME: str = os.getenv("PODCASTS_DATABASE_NAME", "podcasts")
     ENVIRONMENT: str
     CORS_ORIGINS: str
+    READWISE_TOKEN: str
 
     @property
     def CORS_ORIGINS_LIST(self) -> List[str]:
