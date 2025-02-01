@@ -1,12 +1,13 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Header
 from typing import List, Optional, Dict, Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.models.article import Article
-from app.core.config import get_database
+from app.core.config import get_database, get_settings
 from bson import ObjectId
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from collections import defaultdict
+import httpx
 
 router = APIRouter(prefix="/reader", tags=["reader"])
 
@@ -38,6 +39,8 @@ class ArticleQueryBuilder:
 class ArticleService:
     def __init__(self, db: AsyncIOMotorDatabase):
         self.db = db
+        self.reader_api_url = "https://readwise.io/api/v3"
+        self.settings = get_settings()
 
     async def get_articles_count(self, query: Dict[str, Any]) -> int:
         return await self.db.archived.count_documents(query)
@@ -352,6 +355,35 @@ class ArticleService:
             "daily_counts": {"archived": archived_daily, "later": later_daily},
         }
 
+    async def update_readwise_location(self, article_id: str) -> Dict[str, Any]:
+        """Update document location in Readwise Reader API"""
+        headers = {"Authorization": f"Token {self.settings.READWISE_TOKEN}"}
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.patch(
+                f"{self.reader_api_url}/update/{article_id}/",
+                headers=headers,
+                json={"location": "archive"}
+            )
+            
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Failed to update document in Readwise: {response.text}"
+                )
+            
+            return response.json()  # This will return the Readwise API response format
+
+    async def move_to_archived(self, article_id: str) -> Dict[str, Any]:
+        # Find the article in 'later' collection to get readwise_id
+        article = await self.db.later.find_one({"id": article_id})
+        
+        if not article:
+            raise HTTPException(status_code=404, detail="Article not found in 'later' collection")
+        
+        # Update in Readwise Reader
+        return await self.update_readwise_location(article_id)
+
 
 def process_mongodb_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
     """Process MongoDB document to handle ObjectId and other special types"""
@@ -500,4 +532,22 @@ async def get_stats(
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Error retrieving statistics: {str(e)}"
+        )
+
+
+@router.post("/articles/{article_id}/archive")
+async def archive_article(
+    article_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_database)
+):
+    """Archive an article by moving it from 'later' to 'archived' collection"""
+    try:
+        article_service = ArticleService(db)
+        return await article_service.move_to_archived(article_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error archiving article: {str(e)}"
         )
