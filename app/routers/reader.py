@@ -358,29 +358,31 @@ class ArticleService:
     async def update_readwise_location(self, article_id: str) -> Dict[str, Any]:
         """Update document location in Readwise Reader API"""
         headers = {"Authorization": f"Token {self.settings.READWISE_TOKEN}"}
-        
+
         async with httpx.AsyncClient() as client:
             response = await client.patch(
                 f"{self.reader_api_url}/update/{article_id}/",
                 headers=headers,
-                json={"location": "archive"}
+                json={"location": "archive"},
             )
-            
+
             if response.status_code != 200:
                 raise HTTPException(
                     status_code=response.status_code,
-                    detail=f"Failed to update document in Readwise: {response.text}"
+                    detail=f"Failed to update document in Readwise: {response.text}",
                 )
-            
+
             return response.json()  # This will return the Readwise API response format
 
     async def move_to_archived(self, article_id: str) -> Dict[str, Any]:
         # Find the article in 'later' collection to get readwise_id
         article = await self.db.later.find_one({"id": article_id})
-        
+
         if not article:
-            raise HTTPException(status_code=404, detail="Article not found in 'later' collection")
-        
+            raise HTTPException(
+                status_code=404, detail="Article not found in 'later' collection"
+            )
+
         # Update in Readwise Reader
         return await self.update_readwise_location(article_id)
 
@@ -537,8 +539,7 @@ async def get_stats(
 
 @router.post("/articles/{article_id}/archive")
 async def archive_article(
-    article_id: str,
-    db: AsyncIOMotorDatabase = Depends(get_database)
+    article_id: str, db: AsyncIOMotorDatabase = Depends(get_database)
 ):
     """Archive an article by moving it from 'later' to 'archived' collection"""
     try:
@@ -548,6 +549,5 @@ async def archive_article(
         raise
     except Exception as e:
         raise HTTPException(
-            status_code=500,
-            detail=f"Error archiving article: {str(e)}"
+            status_code=500, detail=f"Error archiving article: {str(e)}"
         )
