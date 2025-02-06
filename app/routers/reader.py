@@ -355,12 +355,14 @@ class ArticleService:
             "daily_counts": {"archived": archived_daily, "later": later_daily},
         }
 
-    async def update_readwise_location(self, article_id: str, location: str) -> Dict[str, Any]:
+    async def update_readwise_location(
+        self, article_id: str, location: str
+    ) -> Dict[str, Any]:
         """Update document location in Readwise Reader API"""
         if location not in ["archive", "shortlist"]:
             raise HTTPException(
-                status_code=400, 
-                detail="Invalid location. Must be either 'archive' or 'shortlist'"
+                status_code=400,
+                detail="Invalid location. Must be either 'archive' or 'shortlist'",
             )
 
         headers = {"Authorization": f"Token {self.settings.READWISE_TOKEN}"}
