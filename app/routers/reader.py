@@ -355,15 +355,21 @@ class ArticleService:
             "daily_counts": {"archived": archived_daily, "later": later_daily},
         }
 
-    async def update_readwise_location(self, article_id: str) -> Dict[str, Any]:
+    async def update_readwise_location(self, article_id: str, location: str) -> Dict[str, Any]:
         """Update document location in Readwise Reader API"""
+        if location not in ["archive", "shortlist"]:
+            raise HTTPException(
+                status_code=400, 
+                detail="Invalid location. Must be either 'archive' or 'shortlist'"
+            )
+
         headers = {"Authorization": f"Token {self.settings.READWISE_TOKEN}"}
 
         async with httpx.AsyncClient() as client:
             response = await client.patch(
                 f"{self.reader_api_url}/update/{article_id}/",
                 headers=headers,
-                json={"location": "archive"},
+                json={"location": location},
             )
 
             if response.status_code != 200:
@@ -372,7 +378,7 @@ class ArticleService:
                     detail=f"Failed to update document in Readwise: {response.text}",
                 )
 
-            return response.json()  # This will return the Readwise API response format
+            return response.json()
 
     async def move_to_archived(self, article_id: str) -> Dict[str, Any]:
         # Find the article in 'later' collection to get readwise_id
@@ -383,8 +389,20 @@ class ArticleService:
                 status_code=404, detail="Article not found in 'later' collection"
             )
 
-        # Update in Readwise Reader
-        return await self.update_readwise_location(article_id)
+        # Update in Readwise Reader with 'archive' location
+        return await self.update_readwise_location(article_id, "archive")
+
+    async def move_to_shortlist(self, article_id: str) -> Dict[str, Any]:
+        # Find the article in 'later' collection
+        article = await self.db.later.find_one({"id": article_id})
+
+        if not article:
+            raise HTTPException(
+                status_code=404, detail="Article not found in 'later' collection"
+            )
+
+        # Update in Readwise Reader with 'shortlist' location
+        return await self.update_readwise_location(article_id, "shortlist")
 
 
 def process_mongodb_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
@@ -550,4 +568,20 @@ async def archive_article(
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Error archiving article: {str(e)}"
+        )
+
+
+@router.post("/articles/{article_id}/shortlist")
+async def shortlist_article(
+    article_id: str, db: AsyncIOMotorDatabase = Depends(get_database)
+):
+    """Move an article to shortlist in Readwise Reader"""
+    try:
+        article_service = ArticleService(db)
+        return await article_service.move_to_shortlist(article_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error shortlisting article: {str(e)}"
         )
