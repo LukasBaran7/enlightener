@@ -10,7 +10,7 @@ from app.services.topic_relevance_analyzer import TopicRelevanceAnalyzer
 from app.services.freshness_analyzer import FreshnessAnalyzer
 from app.services.engagement_analyzer import EngagementAnalyzer
 from bson import ObjectId
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import logging
 
 router = APIRouter(prefix="/prioritization", tags=["prioritization"])
@@ -618,4 +618,226 @@ async def get_prioritization_sample(
         logger.error(f"Error in get_prioritization_sample: {str(e)}")
         raise HTTPException(
             status_code=500, detail=f"Error retrieving prioritization sample: {str(e)}"
+        )
+
+
+@router.get("/low-priority", response_model=Dict[str, Any])
+async def get_low_priority_articles(
+    limit: int = Query(
+        default=10, ge=1, le=50, description="Number of articles to return"
+    ),
+    min_age_days: int = Query(
+        default=1095, ge=0, description="Minimum age of articles in days"
+    ),
+    db: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """
+    Get articles that are candidates for archiving without reading.
+
+    Identifies articles with low priority scores, old publication dates,
+    failed content extraction, or other indicators that suggest they
+    may not be worth reading.
+    """
+    try:
+        service = PrioritizationService(db)
+
+        # Calculate the cutoff date based on min_age_days
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=min_age_days)
+        cutoff_timestamp = int(
+            cutoff_date.timestamp() * 1000
+        )  # Convert to milliseconds
+
+        # Query for low priority articles with specific criteria
+        pipeline = [
+            {
+                "$match": {
+                    "$or": [
+                        # Articles with low priority scores (using a fixed threshold)
+                        {"priority_score": {"$lte": 30.0}},
+                        # Articles with old publication dates
+                        {"published_date": {"$lt": cutoff_timestamp, "$ne": None}},
+                        # Articles with failed content extraction
+                        {"content_extraction_failed": True},
+                        # Articles with very low component scores
+                        {"component_scores.readability": {"$lte": 3.0}},
+                        {"component_scores.information_density": {"$lte": 3.0}},
+                        {"component_scores.topic_relevance": {"$lte": 3.0}},
+                        # Articles with broken URLs or missing content
+                        {"content": {"$in": [None, "", "<html>", "<body>"]}},
+                        # Minimal content length
+                        {"word_count": {"$lt": 300, "$ne": None}},
+                        # Long-term neglect (saved over 6 months ago, never opened)
+                        {
+                            "saved_at": {
+                                "$lt": datetime.now(timezone.utc) - timedelta(days=180)
+                            },
+                            "first_opened_at": None,
+                        },
+                        # Stale interest (not opened in over a year)
+                        {
+                            "last_opened_at": {
+                                "$lt": datetime.now(timezone.utc) - timedelta(days=365)
+                            }
+                        },
+                        # Multiple abandoned attempts (opened multiple times but low progress)
+                        {
+                            "reading_progress": {"$lt": 0.2},
+                            "first_opened_at": {"$ne": None},
+                            "last_opened_at": {"$ne": None, "$ne": "$first_opened_at"},
+                        },
+                        # Missing critical metadata
+                        {
+                            "$or": [
+                                {"title": {"$in": [None, ""]}},
+                                {"author": {"$in": [None, ""]}},
+                                {"url": {"$in": [None, ""]}},
+                            ]
+                        },
+                        # Empty tags
+                        {"tags": {"$in": [None, {}, []]}},
+                    ]
+                }
+            },
+            {"$sort": {"priority_score": 1}},  # Sort by priority score ascending
+            {"$limit": limit * 2},  # Get more than needed for processing
+        ]
+
+        cursor = db.later.aggregate(pipeline)
+        articles = await cursor.to_list(length=None)
+
+        # Process articles without scores if needed
+        articles_with_scores = []
+        articles_without_scores = []
+
+        for article in articles:
+            if "priority_score" in article and article["priority_score"] is not None:
+                articles_with_scores.append(article)
+            else:
+                articles_without_scores.append(article)
+
+        # Process articles without scores
+        if articles_without_scores:
+            # Extract content for articles
+            processed_articles = await service.extract_content_for_articles(
+                articles_without_scores
+            )
+
+            # Run all analysis steps
+            analyzed_articles = await service.analyze_readability(processed_articles)
+            analyzed_articles = await service.analyze_information_density(
+                analyzed_articles
+            )
+            analyzed_articles = await service.analyze_topic_relevance(analyzed_articles)
+            analyzed_articles = await service.analyze_freshness(analyzed_articles)
+            analyzed_articles = await service.analyze_engagement_potential(
+                analyzed_articles
+            )
+
+            # Calculate priority scores
+            prioritized_articles = await service.calculate_priority_scores(
+                analyzed_articles
+            )
+
+            # Save results to database
+            await service.save_prioritization_results(prioritized_articles)
+
+            # Combine with articles that already had scores
+            all_articles = articles_with_scores + prioritized_articles
+        else:
+            all_articles = articles_with_scores
+
+        # Format articles for output
+        formatted_articles = await service.format_prioritized_articles(all_articles)
+
+        # Sort by priority score (ascending) to get the lowest scores first
+        formatted_articles.sort(key=lambda x: x["priority_score"])
+
+        # Add archive recommendation reason
+        for article in formatted_articles:
+            reasons = []
+
+            # Check for low priority score (using fixed threshold of 30.0)
+            if article.get("priority_score", 100) <= 30.0:
+                reasons.append("low_priority_score")
+
+            # Check for old publication date
+            pub_date = article.get("published_date")
+            if pub_date and (isinstance(pub_date, int) and pub_date < cutoff_timestamp):
+                reasons.append("old_publication_date")
+
+            # Check for failed content extraction
+            if article.get("content_extraction_failed") or not article.get("content"):
+                reasons.append("content_extraction_failed")
+
+            # Check for low component scores
+            component_scores = article.get("component_scores", {})
+            if component_scores.get("readability", 10) <= 3.0:
+                reasons.append("low_readability")
+            if component_scores.get("information_density", 10) <= 3.0:
+                reasons.append("low_information_density")
+            if component_scores.get("topic_relevance", 10) <= 3.0:
+                reasons.append("low_topic_relevance")
+
+            # Check for long-term neglect
+            saved_at = article.get("saved_at")
+            first_opened_at = article.get("first_opened_at")
+            if (
+                saved_at
+                and not first_opened_at
+                and isinstance(saved_at, datetime)
+                and (datetime.now(timezone.utc) - saved_at).days > 180
+            ):
+                reasons.append("long_term_neglect")
+
+            # Check for stale interest
+            last_opened_at = article.get("last_opened_at")
+            if (
+                last_opened_at
+                and isinstance(last_opened_at, datetime)
+                and (datetime.now(timezone.utc) - last_opened_at).days > 365
+            ):
+                reasons.append("stale_interest")
+
+            # Check for abandoned reading attempts
+            reading_progress = article.get("reading_progress", 1.0)
+            if (
+                reading_progress < 0.2
+                and first_opened_at
+                and last_opened_at
+                and first_opened_at != last_opened_at
+            ):
+                reasons.append("abandoned_reading")
+
+            # Check for missing critical metadata
+            if (
+                not article.get("title")
+                or not article.get("author")
+                or not article.get("url")
+            ):
+                reasons.append("missing_critical_metadata")
+
+            # Add reasons to article
+            article["archive_reasons"] = reasons
+
+        # Take only the top N articles
+        top_low_priority = formatted_articles[:limit]
+
+        # Add metadata about scores
+        response = {
+            "articles": top_low_priority,
+            "metadata": {
+                "total_processed": len(formatted_articles),
+                "returned_count": len(top_low_priority),
+                "criteria": {
+                    "min_age_days": min_age_days,
+                },
+            },
+        }
+
+        return response
+
+    except Exception as e:
+        logger.error(f"Error in get_low_priority_articles: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error retrieving low priority articles: {str(e)}"
         )
