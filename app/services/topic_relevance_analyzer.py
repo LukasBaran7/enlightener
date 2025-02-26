@@ -1,7 +1,6 @@
 import re
 import math
 import nltk
-from nltk.tokenize import word_tokenize
 from collections import Counter
 from typing import Dict, Any, List, Set, Tuple
 import logging
@@ -10,14 +9,23 @@ import json
 
 logger = logging.getLogger(__name__)
 
-# Ensure NLTK resources are available
+# Create NLTK data directory if it doesn't exist
+nltk_data_dir = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "nltk_data"
+)
+os.makedirs(nltk_data_dir, exist_ok=True)
+
+# Set NLTK data path
+nltk.data.path.append(nltk_data_dir)
+
+# Download required NLTK resources
 try:
-    nltk.data.find("tokenizers/punkt")
-except LookupError:
-    nltk_data_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "nltk_data"
-    )
+    # Download punkt tokenizer
     nltk.download("punkt", download_dir=nltk_data_dir, quiet=True)
+    logger.info("NLTK punkt tokenizer download complete")
+except Exception as e:
+    logger.warning(f"Failed to download NLTK resources: {str(e)}")
+    logger.warning("Will use simple tokenization as fallback")
 
 
 class TopicRelevanceAnalyzer:
@@ -37,6 +45,7 @@ class TopicRelevanceAnalyzer:
         """
         # Default topics if no file is provided
         self.default_topics = {
+            # English topics
             "technology": {
                 "keywords": [
                     "software",
@@ -61,332 +70,221 @@ class TopicRelevanceAnalyzer:
                     "blockchain",
                     "crypto",
                     "cybersecurity",
-                    "tech",
-                    "innovation",
-                    "startup",
-                    "automation",
-                    "robot",
-                    "iot",
-                    "web3",
                 ],
                 "weight": 1.0,
             },
-            "business": {
+            # Add Polish topics
+            "technologia": {
                 "keywords": [
-                    "business",
-                    "company",
-                    "corporation",
-                    "startup",
-                    "entrepreneur",
-                    "market",
-                    "finance",
-                    "investment",
-                    "stock",
-                    "economy",
-                    "economic",
-                    "industry",
-                    "commercial",
-                    "trade",
-                    "venture",
-                    "capital",
-                    "profit",
-                    "revenue",
-                    "growth",
-                    "strategy",
-                    "management",
-                    "leadership",
-                    "ceo",
-                    "executive",
-                    "board",
-                    "shareholder",
-                    "stakeholder",
-                    "merger",
-                    "acquisition",
+                    "oprogramowanie",
+                    "sprzęt",
+                    "programowanie",
+                    "algorytm",
+                    "komputer",
+                    "technologia",
+                    "cyfrowy",
+                    "internet",
+                    "aplikacja",
+                    "mobilny",
+                    "urządzenie",
+                    "kod",
+                    "dane",
+                    "chmura",
+                    "sztuczna inteligencja",
+                    "uczenie maszynowe",
+                    "sieć neuronowa",
+                    "blockchain",
+                    "krypto",
+                    "cyberbezpieczeństwo",
                 ],
                 "weight": 1.0,
             },
-            "science": {
+            "finanse": {
                 "keywords": [
-                    "science",
-                    "scientific",
-                    "research",
-                    "experiment",
-                    "laboratory",
-                    "discovery",
-                    "theory",
-                    "hypothesis",
-                    "evidence",
-                    "data",
-                    "analysis",
-                    "physics",
-                    "chemistry",
-                    "biology",
-                    "astronomy",
-                    "geology",
-                    "medicine",
-                    "neuroscience",
-                    "genetics",
-                    "molecular",
-                    "quantum",
-                    "particle",
-                    "cell",
-                    "organism",
-                    "ecosystem",
-                    "climate",
-                    "environment",
-                    "sustainability",
-                ],
-                "weight": 1.0,
-            },
-            "health": {
-                "keywords": [
-                    "health",
-                    "healthcare",
-                    "medical",
-                    "medicine",
-                    "doctor",
-                    "hospital",
-                    "patient",
-                    "treatment",
-                    "therapy",
-                    "disease",
-                    "condition",
-                    "symptom",
-                    "diagnosis",
-                    "prevention",
-                    "wellness",
-                    "fitness",
-                    "nutrition",
-                    "diet",
-                    "exercise",
-                    "mental health",
-                    "psychology",
-                    "psychiatry",
-                    "pharmaceutical",
-                    "drug",
-                    "vaccine",
-                    "immunity",
-                    "surgery",
-                    "recovery",
-                    "chronic",
-                    "acute",
-                ],
-                "weight": 1.0,
-            },
-            "politics": {
-                "keywords": [
-                    "politics",
-                    "political",
-                    "government",
-                    "policy",
-                    "election",
-                    "vote",
-                    "democracy",
-                    "democratic",
-                    "republican",
-                    "liberal",
-                    "conservative",
-                    "progressive",
-                    "legislation",
-                    "law",
-                    "regulation",
-                    "congress",
-                    "senate",
-                    "parliament",
-                    "president",
-                    "prime minister",
-                    "diplomat",
-                    "foreign policy",
-                    "domestic policy",
-                    "campaign",
-                    "candidate",
-                    "party",
-                    "constitution",
-                ],
-                "weight": 1.0,
-            },
-            "finance": {
-                "keywords": [
-                    "finance",
-                    "financial",
-                    "money",
-                    "banking",
+                    "finanse",
+                    "pieniądze",
+                    "waluta",
                     "bank",
-                    "investment",
-                    "investor",
-                    "fund",
-                    "stock",
-                    "bond",
-                    "market",
-                    "trading",
-                    "trader",
-                    "portfolio",
-                    "asset",
-                    "liability",
-                    "equity",
-                    "debt",
-                    "credit",
-                    "loan",
-                    "mortgage",
-                    "interest",
-                    "dividend",
-                    "capital",
-                    "cash",
-                    "currency",
-                    "exchange",
-                    "inflation",
-                    "deflation",
-                    "recession",
-                    "economy",
-                    "tax",
+                    "kredyt",
+                    "pożyczka",
+                    "inwestycja",
+                    "oszczędności",
+                    "budżet",
+                    "podatek",
+                    "ekonomia",
+                    "giełda",
+                    "akcje",
+                    "obligacje",
+                    "fundusz",
+                    "emerytura",
+                    "ubezpieczenie",
+                    "płatność",
+                    "transakcja",
+                    "konto",
+                    "kapitał",
+                    "zysk",
+                    "strata",
                 ],
                 "weight": 1.0,
             },
-            "education": {
+            "zdrowie": {
                 "keywords": [
-                    "education",
-                    "educational",
-                    "school",
-                    "university",
-                    "college",
-                    "student",
-                    "teacher",
-                    "professor",
-                    "academic",
-                    "learning",
-                    "teaching",
-                    "curriculum",
-                    "course",
-                    "class",
-                    "lecture",
-                    "study",
-                    "research",
-                    "knowledge",
-                    "skill",
-                    "literacy",
-                    "scholarship",
-                    "degree",
-                    "diploma",
-                    "certificate",
-                    "training",
-                    "development",
-                    "pedagogy",
-                    "instruction",
-                    "classroom",
-                    "online learning",
+                    "zdrowie",
+                    "medycyna",
+                    "lekarz",
+                    "pacjent",
+                    "choroba",
+                    "leczenie",
+                    "szpital",
+                    "klinika",
+                    "diagnoza",
+                    "terapia",
+                    "lek",
+                    "farmacja",
+                    "dieta",
+                    "odżywianie",
+                    "fitness",
+                    "ćwiczenia",
+                    "wellness",
+                    "profilaktyka",
+                    "badanie",
+                    "operacja",
+                    "rehabilitacja",
+                    "psychologia",
+                    "psychiatria",
                 ],
                 "weight": 1.0,
             },
-            "entertainment": {
-                "keywords": [
-                    "entertainment",
-                    "movie",
-                    "film",
-                    "television",
-                    "tv",
-                    "show",
-                    "series",
-                    "actor",
-                    "actress",
-                    "director",
-                    "producer",
-                    "celebrity",
-                    "star",
-                    "fame",
-                    "music",
-                    "musician",
-                    "artist",
-                    "band",
-                    "concert",
-                    "performance",
-                    "theater",
-                    "theatre",
-                    "stage",
-                    "comedy",
-                    "drama",
-                    "streaming",
-                    "netflix",
-                    "disney",
-                    "hollywood",
-                    "bollywood",
-                    "game",
-                    "gaming",
-                    "video game",
-                    "esports",
-                ],
-                "weight": 1.0,
-            },
+            # Keep other English topics...
         }
 
-        # Load custom topics if file is provided
-        self.topics = self._load_topics(topics_file)
-
-        # Common stop words to filter out
-        self.stop_words = set(
-            [
-                "the",
-                "a",
-                "an",
-                "and",
-                "or",
-                "but",
-                "is",
-                "are",
-                "was",
-                "were",
-                "in",
-                "on",
-                "at",
-                "to",
-                "for",
-                "with",
-                "by",
-                "about",
-                "of",
-                "from",
-                "as",
-                "this",
-                "that",
-                "these",
-                "those",
-                "it",
-                "its",
-                "they",
-                "them",
-                "their",
-                "he",
-                "she",
-                "his",
-                "her",
-                "we",
-                "our",
-                "you",
-                "your",
-            ]
-        )
-
-    def _load_topics(self, topics_file: str = None) -> Dict[str, Dict[str, Any]]:
-        """
-        Load topics from file or use defaults.
-
-        Args:
-            topics_file: Path to JSON file containing topic definitions
-
-        Returns:
-            Dictionary of topics with keywords and weights
-        """
+        # Load topics from file or use defaults
         if topics_file and os.path.exists(topics_file):
             try:
                 with open(topics_file, "r") as f:
-                    topics = json.load(f)
-                logger.info(f"Loaded {len(topics)} topics from {topics_file}")
-                return topics
+                    self.topics = json.load(f)
             except Exception as e:
-                logger.warning(f"Failed to load topics from {topics_file}: {str(e)}")
-                logger.warning("Using default topics instead")
+                logger.warning(f"Error loading topics file: {str(e)}")
+                self.topics = self.default_topics
+        else:
+            self.topics = self.default_topics
 
-        logger.info(f"Using {len(self.default_topics)} default topics")
-        return self.default_topics
+        # Common stop words in multiple languages (expanded)
+        self.stop_words = {
+            # English stop words
+            "the",
+            "a",
+            "an",
+            "and",
+            "or",
+            "but",
+            "is",
+            "are",
+            "was",
+            "were",
+            "in",
+            "on",
+            "at",
+            "to",
+            "for",
+            "with",
+            "by",
+            "about",
+            "of",
+            "from",
+            "as",
+            "this",
+            "that",
+            "these",
+            "those",
+            "it",
+            "its",
+            "they",
+            "them",
+            "their",
+            "he",
+            "she",
+            "his",
+            "her",
+            "we",
+            "our",
+            "you",
+            "your",
+            # Polish stop words (expanded)
+            "w",
+            "i",
+            "na",
+            "z",
+            "do",
+            "że",
+            "to",
+            "o",
+            "dla",
+            "jest",
+            "nie",
+            "się",
+            "od",
+            "przez",
+            "po",
+            "jak",
+            "co",
+            "lub",
+            "aby",
+            "przy",
+            "tak",
+            "który",
+            "która",
+            "które",
+            "gdy",
+            "być",
+            "ten",
+            "ta",
+            "te",
+            "tego",
+            "tej",
+            "tych",
+            "tym",
+            "temu",
+            "jako",
+            "tylko",
+            "już",
+            "też",
+            "można",
+            "ma",
+            "był",
+            "była",
+            "było",
+            "będzie",
+            "są",
+            "ich",
+            "jego",
+            "jej",
+            "mnie",
+            "mi",
+            "moje",
+            "twoje",
+            "swoje",
+            "nasz",
+            "wasz",
+            "a",
+            "ale",
+            "więc",
+            "bo",
+            "gdyż",
+            "ponieważ",
+            "oraz",
+            "czy",
+            "kiedy",
+            "gdzie",
+            "kto",
+            "co",
+            "który",
+            "jaki",
+            "czyj",
+            "ile",
+            "skąd",
+            "dokąd",
+        }
 
     def analyze(self, content: str) -> Dict[str, Any]:
         """
@@ -405,15 +303,28 @@ class TopicRelevanceAnalyzer:
                 "normalized_score": 5.0,  # Default middle score for insufficient content
             }
 
-        # Tokenize and preprocess content
+        # Detect if content is likely Polish
+        is_polish = self._is_likely_polish(content)
+
+        # Tokenize content with language-aware tokenization
         try:
-            words = word_tokenize(content.lower())
+            # Use language-specific word pattern
+            if is_polish:
+                # Include Polish characters in word pattern
+                words = [
+                    w.lower()
+                    for w in re.findall(r"\b[a-zA-ZąćęłńóśźżĄĆĘŁŃÓŚŹŻ]+\b", content)
+                ]
+            else:
+                words = [w.lower() for w in re.findall(r"\b[a-zA-Z]+\b", content)]
         except Exception as e:
             logger.warning(
-                f"NLTK tokenization failed: {str(e)}, using fallback tokenization"
+                f"Tokenization failed: {str(e)}, using fallback tokenization"
             )
             # Simple fallback tokenization
-            words = [w.lower() for w in re.findall(r"\b[a-zA-Z0-9]+\b", content)]
+            words = [
+                w.lower() for w in re.findall(r"\b\w+\b", content)
+            ]  # \w matches any word character
 
         # Filter out stop words and short words
         filtered_words = [
@@ -439,6 +350,25 @@ class TopicRelevanceAnalyzer:
             "topic_matches": topic_matches,
             "normalized_score": round(normalized_score, 2),
         }
+
+    def _is_likely_polish(self, content: str) -> bool:
+        """
+        Detect if content is likely Polish based on character frequency.
+
+        Args:
+            content: The text content to analyze
+
+        Returns:
+            True if content is likely Polish, False otherwise
+        """
+        # Polish-specific characters
+        polish_chars = set("ąćęłńóśźżĄĆĘŁŃÓŚŹŻ")
+
+        # Count Polish characters
+        polish_char_count = sum(1 for char in content if char in polish_chars)
+
+        # If more than 0.5% of characters are Polish-specific, consider it Polish
+        return polish_char_count > len(content) * 0.005
 
     def _calculate_topic_matches(self, word_freq: Counter) -> Dict[str, float]:
         """

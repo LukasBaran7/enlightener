@@ -1,7 +1,6 @@
 import re
 import math
 import nltk
-from nltk.tokenize import word_tokenize, sent_tokenize
 from collections import Counter
 from typing import Dict, Any, List, Set, Tuple
 import logging
@@ -21,15 +20,9 @@ nltk.data.path.append(nltk_data_dir)
 
 # Download required NLTK resources
 try:
-    # First check if punkt is already downloaded
-    try:
-        nltk.data.find("tokenizers/punkt")
-        logger.info("NLTK punkt tokenizer already downloaded")
-    except LookupError:
-        # Download punkt tokenizer
-        logger.info(f"Downloading NLTK punkt tokenizer to {nltk_data_dir}")
-        nltk.download("punkt", download_dir=nltk_data_dir, quiet=True)
-        logger.info("NLTK punkt tokenizer download complete")
+    # Download punkt tokenizer directly without checking first
+    nltk.download("punkt", download_dir=nltk_data_dir, quiet=True)
+    logger.info("NLTK punkt tokenizer download complete")
 except Exception as e:
     logger.warning(f"Failed to download NLTK resources: {str(e)}")
     logger.warning("Will use simple tokenization as fallback")
@@ -45,8 +38,9 @@ class InformationDensityAnalyzer:
 
     def __init__(self):
         """Initialize the information density analyzer."""
-        # Patterns for identifying factual content
+        # Patterns for identifying factual content (including Polish patterns)
         self.fact_patterns = [
+            # English patterns
             r"\b\d+(?:\.\d+)?%\b",  # Percentages
             r"\b\d+(?:,\d+)*(?:\.\d+)?\b",  # Numbers
             r"\b(?:in|during|since|before|after|around)\s+\d{4}\b",  # Years with context
@@ -54,6 +48,12 @@ class InformationDensityAnalyzer:
             r"\$\d+(?:,\d+)*(?:\.\d+)?\b",  # Dollar amounts
             r"\b\d+(?:,\d+)*\s+(?:people|users|customers|patients|students)\b",  # Quantities of people
             r"\b(?:according to|cited by|reported by|study by|research by|survey by)\b",  # Citations
+            # Polish patterns
+            r"\b\d+(?:,\d+)*\s+(?:zł|PLN)\b",  # Polish currency
+            r"\b(?:styczeń|luty|marzec|kwiecień|maj|czerwiec|lipiec|sierpień|wrzesień|październik|listopad|grudzień)\s+\d{4}\b",  # Polish months with year
+            r"\b(?:w|podczas|od|do|przed|po)\s+\d{4}\b",  # Polish years with context
+            r"\b\d+(?:,\d+)*\s+(?:osób|ludzi|pracowników|studentów|pacjentów)\b",  # Polish quantities of people
+            r"\b(?:według|zgodnie z|jak podaje|badania|raport)\b",  # Polish citations
         ]
         self.fact_patterns = [
             re.compile(pattern, re.IGNORECASE) for pattern in self.fact_patterns
@@ -100,7 +100,7 @@ class InformationDensityAnalyzer:
             "our",
             "you",
             "your",
-            # Polish stop words
+            # Polish stop words (expanded)
             "w",
             "i",
             "na",
@@ -156,6 +156,46 @@ class InformationDensityAnalyzer:
             "swoje",
             "nasz",
             "wasz",
+            "a",
+            "ale",
+            "więc",
+            "bo",
+            "gdyż",
+            "ponieważ",
+            "oraz",
+            "czy",
+            "kiedy",
+            "gdzie",
+            "kto",
+            "co",
+            "który",
+            "jaki",
+            "czyj",
+            "ile",
+            "skąd",
+            "dokąd",
+            "dlaczego",
+            "dlatego",
+            "aby",
+            "żeby",
+            "jeśli",
+            "jeżeli",
+            "gdyby",
+            "niż",
+            "niżeli",
+            "ani",
+            "albo",
+            "lecz",
+            "jednak",
+            "natomiast",
+            "zaś",
+            "zatem",
+            "więc",
+            "toteż",
+            "dlatego",
+            "stąd",
+            "potem",
+            "następnie",
         }
 
     def analyze(self, content: str) -> Dict[str, Any]:
@@ -177,17 +217,32 @@ class InformationDensityAnalyzer:
                 "normalized_score": 5.0,  # Default middle score for insufficient content
             }
 
-        # Tokenize content with fallback to simple tokenization if NLTK fails
+        # Detect if content is likely Polish
+        is_polish = self._is_likely_polish(content)
+
+        # Tokenize content with language-aware tokenization
         try:
-            sentences = sent_tokenize(content)
-            words = word_tokenize(content.lower())
+            # Use simple regex-based tokenization instead of NLTK
+            sentences = [s.strip() for s in re.split(r"[.!?]+", content) if s.strip()]
+
+            # Use language-specific word pattern
+            if is_polish:
+                # Include Polish characters in word pattern
+                words = [
+                    w.lower()
+                    for w in re.findall(r"\b[a-zA-ZąćęłńóśźżĄĆĘŁŃÓŚŹŻ]+\b", content)
+                ]
+            else:
+                words = [w.lower() for w in re.findall(r"\b[a-zA-Z]+\b", content)]
         except Exception as e:
             logger.warning(
-                f"NLTK tokenization failed: {str(e)}, using fallback tokenization"
+                f"Tokenization failed: {str(e)}, using fallback tokenization"
             )
             # Simple fallback tokenization
             sentences = [s.strip() for s in re.split(r"[.!?]+", content) if s.strip()]
-            words = [w.lower() for w in re.findall(r"\b[a-zA-Z0-9]+\b", content)]
+            words = [
+                w.lower() for w in re.findall(r"\b\w+\b", content)
+            ]  # \w matches any word character
 
         # Filter out punctuation, numbers, and stop words
         filtered_words = [
@@ -219,6 +274,25 @@ class InformationDensityAnalyzer:
             "key_concepts": key_concepts[:10],  # Return top 10 concepts
             "normalized_score": round(normalized_score, 2),
         }
+
+    def _is_likely_polish(self, content: str) -> bool:
+        """
+        Detect if content is likely Polish based on character frequency.
+
+        Args:
+            content: The text content to analyze
+
+        Returns:
+            True if content is likely Polish, False otherwise
+        """
+        # Polish-specific characters
+        polish_chars = set("ąćęłńóśźżĄĆĘŁŃÓŚŹŻ")
+
+        # Count Polish characters
+        polish_char_count = sum(1 for char in content if char in polish_chars)
+
+        # If more than 0.5% of characters are Polish-specific, consider it Polish
+        return polish_char_count > len(content) * 0.005
 
     def _calculate_lexical_diversity(self, words: List[str]) -> float:
         """

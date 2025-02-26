@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.models.article import Article
 from app.core.config import get_database
@@ -7,7 +7,9 @@ from app.services.content_extractor import ContentExtractor
 from app.services.readability_analyzer import ReadabilityAnalyzer
 from app.services.information_density_analyzer import InformationDensityAnalyzer
 from app.services.topic_relevance_analyzer import TopicRelevanceAnalyzer
+from app.services.freshness_analyzer import FreshnessAnalyzer
 from bson import ObjectId
+from datetime import datetime
 import logging
 
 router = APIRouter(prefix="/prioritization", tags=["prioritization"])
@@ -21,6 +23,7 @@ class PrioritizationService:
         self.readability_analyzer = ReadabilityAnalyzer()
         self.information_density_analyzer = InformationDensityAnalyzer()
         self.topic_relevance_analyzer = TopicRelevanceAnalyzer()
+        self.freshness_analyzer = FreshnessAnalyzer()
 
     async def get_random_articles_for_prioritization(
         self, limit: int = 10
@@ -184,6 +187,77 @@ class PrioritizationService:
 
         return articles
 
+    async def analyze_freshness(
+        self, articles: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Analyze content freshness for a list of articles.
+
+        Args:
+            articles: List of article documents with extracted content
+
+        Returns:
+            List of articles with freshness metrics
+        """
+        for article in articles:
+            content = article.get("extracted_content", "")
+            if content:
+                # Get publication date if available
+                published_date = None
+                if "published_date" in article and article["published_date"]:
+                    try:
+                        # Handle millisecond timestamp
+                        if isinstance(article["published_date"], int):
+                            published_date = datetime.fromtimestamp(
+                                article["published_date"] / 1000
+                            )
+                        # Handle datetime object
+                        elif isinstance(article["published_date"], datetime):
+                            published_date = article["published_date"]
+                    except Exception as e:
+                        logger.warning(f"Error parsing published_date: {str(e)}")
+
+                # Determine category based on article metadata or topic relevance
+                category = "default"
+                if "category" in article and article["category"]:
+                    category = article["category"]
+                elif "topic_relevance" in article and article["topic_relevance"].get(
+                    "top_topics"
+                ):
+                    # Map top topic to a category if possible
+                    top_topic = (
+                        article["topic_relevance"]["top_topics"][0]
+                        if article["topic_relevance"]["top_topics"]
+                        else None
+                    )
+                    if top_topic == "technology":
+                        category = "technology"
+                    elif top_topic == "science":
+                        category = "science"
+                    elif top_topic in ["politics", "business", "finance"]:
+                        category = "news"
+                    elif top_topic in ["education", "health"]:
+                        category = "evergreen"
+
+                # Analyze freshness
+                freshness_metrics = self.freshness_analyzer.analyze(
+                    content, published_date, category
+                )
+
+                # Add freshness metrics to article
+                article["freshness"] = freshness_metrics
+            else:
+                # Default metrics for articles without content
+                article["freshness"] = {
+                    "age_days": 0,
+                    "temporal_references_count": 0,
+                    "decay_rate": 180,  # Default decay rate
+                    "is_recent": False,
+                    "normalized_score": 5.0,
+                }
+
+        return articles
+
 
 @router.get("/sample", response_model=List[Dict[str, Any]])
 async def get_prioritization_sample(
@@ -212,6 +286,9 @@ async def get_prioritization_sample(
 
         # Analyze topic relevance
         analyzed_articles = await service.analyze_topic_relevance(analyzed_articles)
+
+        # Analyze freshness
+        analyzed_articles = await service.analyze_freshness(analyzed_articles)
 
         # Convert ObjectId to string for JSON serialization
         for article in analyzed_articles:
