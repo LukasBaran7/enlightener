@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.models.article import Article
 from app.core.config import get_database
@@ -8,6 +8,7 @@ from app.services.readability_analyzer import ReadabilityAnalyzer
 from app.services.information_density_analyzer import InformationDensityAnalyzer
 from app.services.topic_relevance_analyzer import TopicRelevanceAnalyzer
 from app.services.freshness_analyzer import FreshnessAnalyzer
+from app.services.engagement_analyzer import EngagementAnalyzer
 from bson import ObjectId
 from datetime import datetime
 import logging
@@ -24,6 +25,7 @@ class PrioritizationService:
         self.information_density_analyzer = InformationDensityAnalyzer()
         self.topic_relevance_analyzer = TopicRelevanceAnalyzer()
         self.freshness_analyzer = FreshnessAnalyzer()
+        self.engagement_analyzer = EngagementAnalyzer()
 
     async def get_random_articles_for_prioritization(
         self, limit: int = 10
@@ -139,12 +141,10 @@ class PrioritizationService:
             content = article.get("extracted_content", "")
             if content:
                 # Analyze information density
-                info_density_metrics = self.information_density_analyzer.analyze(
-                    content
-                )
+                density_metrics = self.information_density_analyzer.analyze(content)
 
                 # Add information density metrics to article
-                article["information_density"] = info_density_metrics
+                article["information_density"] = density_metrics
             else:
                 # Default metrics for articles without content
                 article["information_density"] = {
@@ -258,6 +258,41 @@ class PrioritizationService:
 
         return articles
 
+    async def analyze_engagement_potential(
+        self, articles: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Analyze engagement potential for a list of articles.
+
+        Args:
+            articles: List of article documents with extracted content
+
+        Returns:
+            List of articles with engagement potential metrics
+        """
+        for article in articles:
+            content = article.get("extracted_content", "")
+            title = article.get("title", "")
+
+            if content:
+                # Analyze engagement potential
+                engagement_metrics = self.engagement_analyzer.analyze(content, title)
+
+                # Add engagement metrics to article
+                article["engagement_potential"] = engagement_metrics
+            else:
+                # Default metrics for articles without content
+                article["engagement_potential"] = {
+                    "emotional_score": 0,
+                    "narrative_score": 0,
+                    "visual_score": 0,
+                    "interactive_score": 0,
+                    "emotion_counts": {"positive": 0, "negative": 0, "surprise": 0},
+                    "normalized_score": 5.0,
+                }
+
+        return articles
+
 
 @router.get("/sample", response_model=List[Dict[str, Any]])
 async def get_prioritization_sample(
@@ -289,6 +324,11 @@ async def get_prioritization_sample(
 
         # Analyze freshness
         analyzed_articles = await service.analyze_freshness(analyzed_articles)
+
+        # Analyze engagement potential
+        analyzed_articles = await service.analyze_engagement_potential(
+            analyzed_articles
+        )
 
         # Convert ObjectId to string for JSON serialization
         for article in analyzed_articles:
