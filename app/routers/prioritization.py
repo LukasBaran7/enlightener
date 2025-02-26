@@ -812,22 +812,22 @@ async def get_llm_scored_sample(
                     "from": "llm_scores",
                     "localField": "id",
                     "foreignField": "article_id",
-                    "as": "llm_score_data"
+                    "as": "llm_score_data",
                 }
             },
             # Filter to only include articles with LLM scores
-            {
-                "$match": {
-                    "llm_score_data": {"$ne": []}
-                }
-            },
+            {"$match": {"llm_score_data": {"$ne": []}}},
             # Add LLM score fields to the article
             {
                 "$addFields": {
                     "llm_score": {"$arrayElemAt": ["$llm_score_data.llm_score", 0]},
                     "llm_analysis": {"$arrayElemAt": ["$llm_score_data.analysis", 0]},
-                    "llm_component_scores": {"$arrayElemAt": ["$llm_score_data.component_scores", 0]},
-                    "llm_recommendation": {"$arrayElemAt": ["$llm_score_data.read_recommendation", 0]}
+                    "llm_component_scores": {
+                        "$arrayElemAt": ["$llm_score_data.component_scores", 0]
+                    },
+                    "llm_recommendation": {
+                        "$arrayElemAt": ["$llm_score_data.read_recommendation", 0]
+                    },
                 }
             },
             # Sort by LLM score (descending) - highest scores first
@@ -837,20 +837,12 @@ async def get_llm_scored_sample(
             # Then take a random subset of the top matches for variety
             {"$sample": {"size": limit}},
             # Project to include only needed fields
-            {
-                "$project": {
-                    "_id": 0,
-                    "llm_score_data": 0
-                }
-            }
+            {"$project": {"_id": 0, "llm_score_data": 0}},
         ]
 
         articles = await db.later.aggregate(pipeline).to_list(length=limit)
-        
-        response = {
-            "count": len(articles),
-            "articles": articles
-        }
+
+        response = {"count": len(articles), "articles": articles}
 
         return response
 
@@ -880,22 +872,22 @@ async def get_llm_archive_candidates(
                     "from": "llm_scores",
                     "localField": "id",
                     "foreignField": "article_id",
-                    "as": "llm_score_data"
+                    "as": "llm_score_data",
                 }
             },
             # Filter to only include articles with LLM scores
-            {
-                "$match": {
-                    "llm_score_data": {"$ne": []}
-                }
-            },
+            {"$match": {"llm_score_data": {"$ne": []}}},
             # Add LLM score fields to the article
             {
                 "$addFields": {
                     "llm_score": {"$arrayElemAt": ["$llm_score_data.llm_score", 0]},
                     "llm_analysis": {"$arrayElemAt": ["$llm_score_data.analysis", 0]},
-                    "llm_component_scores": {"$arrayElemAt": ["$llm_score_data.component_scores", 0]},
-                    "llm_recommendation": {"$arrayElemAt": ["$llm_score_data.read_recommendation", 0]}
+                    "llm_component_scores": {
+                        "$arrayElemAt": ["$llm_score_data.component_scores", 0]
+                    },
+                    "llm_recommendation": {
+                        "$arrayElemAt": ["$llm_score_data.read_recommendation", 0]
+                    },
                 }
             },
             # Sort by LLM score (ascending) - lowest scores first
@@ -905,20 +897,12 @@ async def get_llm_archive_candidates(
             # Then take a random subset of the bottom matches for variety
             {"$sample": {"size": limit}},
             # Project to include only needed fields
-            {
-                "$project": {
-                    "_id": 0,
-                    "llm_score_data": 0
-                }
-            }
+            {"$project": {"_id": 0, "llm_score_data": 0}},
         ]
 
         articles = await db.later.aggregate(pipeline).to_list(length=limit)
-        
-        response = {
-            "count": len(articles),
-            "articles": articles
-        }
+
+        response = {"count": len(articles), "articles": articles}
 
         return response
 

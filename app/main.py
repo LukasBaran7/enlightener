@@ -33,6 +33,7 @@ app.include_router(podcast.router)
 app.include_router(prioritization.router)
 app.include_router(router)
 
+
 @app.get("/")
 async def root():
     return {"message": "Welcome to Reader API"}
