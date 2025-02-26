@@ -72,16 +72,16 @@ class PrioritizationService:
             List of articles with extracted content
         """
         result = []
-        
+
         # Collect all article IDs
         article_ids = []
         article_id_map = {}
-        
+
         for article_doc in articles:
             article_copy = article_doc.copy()
             if "_id" in article_copy and isinstance(article_copy["_id"], ObjectId):
                 article_copy["_id"] = str(article_copy["_id"])
-            
+
             # Convert MongoDB document to Article model
             try:
                 article = Article.model_validate(article_copy)
@@ -90,8 +90,10 @@ class PrioritizationService:
                     article_id_map[article.id] = article
                     article_doc["article_model"] = article
             except Exception as e:
-                logger.error(f"Error validating article {article_copy.get('_id')}: {str(e)}")
-        
+                logger.error(
+                    f"Error validating article {article_copy.get('_id')}: {str(e)}"
+                )
+
         # Batch retrieve HTML content for all articles
         html_docs = {}
         if article_ids:
@@ -99,41 +101,49 @@ class PrioritizationService:
             async for html_doc in cursor:
                 if "article_id" in html_doc and "html" in html_doc and html_doc["html"]:
                     html_docs[html_doc["article_id"]] = html_doc["html"]
-            
-            logger.info(f"Retrieved {len(html_docs)} HTML documents from later_html collection")
-        
+
+            logger.info(
+                f"Retrieved {len(html_docs)} HTML documents from later_html collection"
+            )
+
         # Process each article with the retrieved HTML content
         for article_doc in articles:
             try:
                 if "article_model" not in article_doc:
                     continue
-                
+
                 article = article_doc["article_model"]
-                
+
                 # Assign HTML content if available
                 if article.id in html_docs:
-                    logger.info(f"Using HTML content from later_html for article {article.id}")
+                    logger.info(
+                        f"Using HTML content from later_html for article {article.id}"
+                    )
                     article.html_content = html_docs[article.id]
-                
+
                 # Extract content
-                extracted_content = await self.content_extractor.extract_content(article)
-                
+                extracted_content = await self.content_extractor.extract_content(
+                    article
+                )
+
                 # Add extracted content to the article document
                 article_doc["extracted_content"] = extracted_content
-                
+
                 # Remove the temporary article_model field
                 del article_doc["article_model"]
-                
+
                 # Add to result if content was successfully extracted
                 if extracted_content:
                     result.append(article_doc)
-                
+
             except Exception as e:
-                logger.error(f"Error processing article {article_doc.get('_id')}: {str(e)}")
+                logger.error(
+                    f"Error processing article {article_doc.get('_id')}: {str(e)}"
+                )
                 # Remove the temporary article_model field if it exists
                 if "article_model" in article_doc:
                     del article_doc["article_model"]
-        
+
         return result
 
     async def analyze_readability(

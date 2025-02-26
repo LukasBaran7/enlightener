@@ -36,7 +36,7 @@ class ContentExtractor:
             Extracted content as string or None if no content could be extracted
         """
         # Strategy 0: Use HTML content from html_content attribute (from later_html collection)
-        if hasattr(article, 'html_content') and article.html_content:
+        if hasattr(article, "html_content") and article.html_content:
             try:
                 content = trafilatura.extract(article.html_content)
                 if content:
