@@ -4,6 +4,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.models.article import Article
 from app.core.config import get_database
 from app.services.content_extractor import ContentExtractor
+from app.services.readability_analyzer import ReadabilityAnalyzer
 from bson import ObjectId
 import logging
 
@@ -15,6 +16,7 @@ class PrioritizationService:
     def __init__(self, db: AsyncIOMotorDatabase):
         self.db = db
         self.content_extractor = ContentExtractor()
+        self.readability_analyzer = ReadabilityAnalyzer()
 
     async def get_random_articles_for_prioritization(
         self, limit: int = 10
@@ -81,6 +83,39 @@ class PrioritizationService:
 
         return result
 
+    async def analyze_readability(
+        self, articles: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Analyze readability for a list of articles with extracted content.
+
+        Args:
+            articles: List of article documents with extracted content
+
+        Returns:
+            List of articles with readability metrics
+        """
+        for article in articles:
+            content = article.get("extracted_content", "")
+            if content:
+                # Analyze readability
+                readability_metrics = self.readability_analyzer.analyze(content)
+
+                # Add readability metrics to article
+                article["readability"] = readability_metrics
+            else:
+                # Default metrics for articles without content
+                article["readability"] = {
+                    "flesch_reading_ease": 0,
+                    "smog_index": 0,
+                    "coleman_liau_index": 0,
+                    "automated_readability_index": 0,
+                    "complexity_level": "Unknown",
+                    "normalized_score": 5.0,
+                }
+
+        return articles
+
 
 @router.get("/sample", response_model=List[Dict[str, Any]])
 async def get_prioritization_sample(
@@ -101,12 +136,15 @@ async def get_prioritization_sample(
         # Extract content for articles
         processed_articles = await service.extract_content_for_articles(articles)
 
+        # Analyze readability
+        analyzed_articles = await service.analyze_readability(processed_articles)
+
         # Convert ObjectId to string for JSON serialization
-        for article in processed_articles:
+        for article in analyzed_articles:
             if "_id" in article:
                 article["_id"] = str(article["_id"])
 
-        return processed_articles
+        return analyzed_articles
 
     except Exception as e:
         logger.error(f"Error in get_prioritization_sample: {str(e)}")
