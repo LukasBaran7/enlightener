@@ -441,9 +441,7 @@ class PrioritizationService:
 
         return formatted_articles
 
-    async def save_prioritization_results(
-        self, articles: List[Dict[str, Any]]
-    ) -> None:
+    async def save_prioritization_results(self, articles: List[Dict[str, Any]]) -> None:
         """
         Save prioritization results back to the database.
 
@@ -454,14 +452,14 @@ class PrioritizationService:
             article_id = article.get("_id")
             if not article_id:
                 continue
-                
+
             # Prepare update data - only include prioritization fields
             update_data = {
                 "priority_score": article.get("priority_score", 0),
                 "component_scores": article.get("component_scores", {}),
                 "priority_score_updated_at": datetime.now(timezone.utc),
             }
-            
+
             # Add analysis results if they exist
             if "readability" in article:
                 update_data["readability"] = article["readability"]
@@ -473,15 +471,16 @@ class PrioritizationService:
                 update_data["freshness"] = article["freshness"]
             if "engagement_potential" in article:
                 update_data["engagement_potential"] = article["engagement_potential"]
-                
+
             try:
                 # Update the article in the database
                 await self.db.later.update_one(
-                    {"_id": article_id},
-                    {"$set": update_data}
+                    {"_id": article_id}, {"$set": update_data}
                 )
             except Exception as e:
-                logger.error(f"Error saving prioritization results for article {article_id}: {str(e)}")
+                logger.error(
+                    f"Error saving prioritization results for article {article_id}: {str(e)}"
+                )
 
     async def check_existing_scores(
         self, articles: List[Dict[str, Any]]
@@ -497,18 +496,15 @@ class PrioritizationService:
         """
         to_process = []
         already_scored = []
-        
+
         for article in articles:
             # Check if article already has priority score
             if "priority_score" in article and article["priority_score"] is not None:
                 already_scored.append(article)
             else:
                 to_process.append(article)
-                
-        return {
-            "to_process": to_process,
-            "already_scored": already_scored
-        }
+
+        return {"to_process": to_process, "already_scored": already_scored}
 
 
 @router.get("/sample", response_model=Dict[str, Any])
@@ -535,31 +531,37 @@ async def get_prioritization_sample(
 
         # Get random articles (larger sample)
         articles = await service.get_random_articles_for_prioritization(sample_size)
-        
+
         # Separate articles with and without scores
         articles_with_scores = []
         articles_without_scores = []
-        
+
         for article in articles:
             if "priority_score" in article and article["priority_score"] is not None:
                 articles_with_scores.append(article)
             else:
                 articles_without_scores.append(article)
-        
+
         # Log counts
         logger.info(f"Found {len(articles_with_scores)} articles with existing scores")
-        logger.info(f"Processing {len(articles_without_scores)} articles without scores")
+        logger.info(
+            f"Processing {len(articles_without_scores)} articles without scores"
+        )
 
         # Process only articles without scores
         if articles_without_scores:
             # Extract content for articles
-            processed_articles = await service.extract_content_for_articles(articles_without_scores)
+            processed_articles = await service.extract_content_for_articles(
+                articles_without_scores
+            )
 
             # Analyze readability
             analyzed_articles = await service.analyze_readability(processed_articles)
 
             # Analyze information density
-            analyzed_articles = await service.analyze_information_density(analyzed_articles)
+            analyzed_articles = await service.analyze_information_density(
+                analyzed_articles
+            )
 
             # Analyze topic relevance
             analyzed_articles = await service.analyze_topic_relevance(analyzed_articles)
@@ -576,11 +578,13 @@ async def get_prioritization_sample(
             prioritized_articles = await service.calculate_priority_scores(
                 analyzed_articles
             )
-            
+
             # Save results to database
             await service.save_prioritization_results(prioritized_articles)
-            logger.info(f"Saved prioritization results for {len(prioritized_articles)} articles")
-            
+            logger.info(
+                f"Saved prioritization results for {len(prioritized_articles)} articles"
+            )
+
             # Combine with articles that already had scores
             all_articles = articles_with_scores + prioritized_articles
         else:
