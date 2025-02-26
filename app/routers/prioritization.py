@@ -6,6 +6,7 @@ from app.core.config import get_database
 from app.services.content_extractor import ContentExtractor
 from app.services.readability_analyzer import ReadabilityAnalyzer
 from app.services.information_density_analyzer import InformationDensityAnalyzer
+from app.services.topic_relevance_analyzer import TopicRelevanceAnalyzer
 from bson import ObjectId
 import logging
 
@@ -19,6 +20,7 @@ class PrioritizationService:
         self.content_extractor = ContentExtractor()
         self.readability_analyzer = ReadabilityAnalyzer()
         self.information_density_analyzer = InformationDensityAnalyzer()
+        self.topic_relevance_analyzer = TopicRelevanceAnalyzer()
 
     async def get_random_articles_for_prioritization(
         self, limit: int = 10
@@ -152,6 +154,36 @@ class PrioritizationService:
 
         return articles
 
+    async def analyze_topic_relevance(
+        self, articles: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Analyze topic relevance for a list of articles with extracted content.
+
+        Args:
+            articles: List of article documents with extracted content
+
+        Returns:
+            List of articles with topic relevance metrics
+        """
+        for article in articles:
+            content = article.get("extracted_content", "")
+            if content:
+                # Analyze topic relevance
+                topic_relevance_metrics = self.topic_relevance_analyzer.analyze(content)
+
+                # Add topic relevance metrics to article
+                article["topic_relevance"] = topic_relevance_metrics
+            else:
+                # Default metrics for articles without content
+                article["topic_relevance"] = {
+                    "top_topics": [],
+                    "topic_matches": {},
+                    "normalized_score": 5.0,
+                }
+
+        return articles
+
 
 @router.get("/sample", response_model=List[Dict[str, Any]])
 async def get_prioritization_sample(
@@ -177,6 +209,9 @@ async def get_prioritization_sample(
 
         # Analyze information density
         analyzed_articles = await service.analyze_information_density(analyzed_articles)
+
+        # Analyze topic relevance
+        analyzed_articles = await service.analyze_topic_relevance(analyzed_articles)
 
         # Convert ObjectId to string for JSON serialization
         for article in analyzed_articles:
