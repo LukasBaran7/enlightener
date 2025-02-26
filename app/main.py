@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import reader, podcast, prioritization
+from app.services.llm_scoring import router
 from app.core.config import get_settings
 import logging
 
@@ -30,7 +31,7 @@ app.add_middleware(
 app.include_router(reader.router)
 app.include_router(podcast.router)
 app.include_router(prioritization.router)
-
+app.include_router(router)
 
 @app.get("/")
 async def root():

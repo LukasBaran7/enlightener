@@ -791,3 +791,139 @@ async def get_low_priority_articles(
         raise HTTPException(
             status_code=500, detail=f"Error retrieving low priority articles: {str(e)}"
         )
+
+
+@router.get("/llm-sample", response_model=Dict[str, Any])
+async def get_llm_scored_sample(
+    limit: int = Query(
+        default=10, ge=1, le=20, description="Number of articles to return"
+    ),
+    db: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """
+    Get a sample of articles sorted by LLM score (highest first).
+    """
+    try:
+        # First get articles that have LLM scores
+        pipeline = [
+            # Join with llm_scores collection
+            {
+                "$lookup": {
+                    "from": "llm_scores",
+                    "localField": "id",
+                    "foreignField": "article_id",
+                    "as": "llm_score_data"
+                }
+            },
+            # Filter to only include articles with LLM scores
+            {
+                "$match": {
+                    "llm_score_data": {"$ne": []}
+                }
+            },
+            # Add LLM score fields to the article
+            {
+                "$addFields": {
+                    "llm_score": {"$arrayElemAt": ["$llm_score_data.llm_score", 0]},
+                    "llm_analysis": {"$arrayElemAt": ["$llm_score_data.analysis", 0]},
+                    "llm_component_scores": {"$arrayElemAt": ["$llm_score_data.component_scores", 0]},
+                    "llm_recommendation": {"$arrayElemAt": ["$llm_score_data.read_recommendation", 0]}
+                }
+            },
+            # Sort by LLM score (descending) - highest scores first
+            {"$sort": {"llm_score": -1}},
+            # Take the top articles
+            {"$limit": limit * 3},  # Get 3x the requested limit
+            # Then take a random subset of the top matches for variety
+            {"$sample": {"size": limit}},
+            # Project to include only needed fields
+            {
+                "$project": {
+                    "_id": 0,
+                    "llm_score_data": 0
+                }
+            }
+        ]
+
+        articles = await db.later.aggregate(pipeline).to_list(length=limit)
+        
+        response = {
+            "count": len(articles),
+            "articles": articles
+        }
+
+        return response
+
+    except Exception as e:
+        logger.error(f"Error in get_llm_scored_sample: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error retrieving LLM scored articles: {str(e)}"
+        )
+
+
+@router.get("/llm-archive", response_model=Dict[str, Any])
+async def get_llm_archive_candidates(
+    limit: int = Query(
+        default=10, ge=1, le=20, description="Number of articles to return"
+    ),
+    db: AsyncIOMotorDatabase = Depends(get_database),
+):
+    """
+    Get articles to archive based on low LLM scores.
+    """
+    try:
+        # First get articles that have LLM scores
+        pipeline = [
+            # Join with llm_scores collection
+            {
+                "$lookup": {
+                    "from": "llm_scores",
+                    "localField": "id",
+                    "foreignField": "article_id",
+                    "as": "llm_score_data"
+                }
+            },
+            # Filter to only include articles with LLM scores
+            {
+                "$match": {
+                    "llm_score_data": {"$ne": []}
+                }
+            },
+            # Add LLM score fields to the article
+            {
+                "$addFields": {
+                    "llm_score": {"$arrayElemAt": ["$llm_score_data.llm_score", 0]},
+                    "llm_analysis": {"$arrayElemAt": ["$llm_score_data.analysis", 0]},
+                    "llm_component_scores": {"$arrayElemAt": ["$llm_score_data.component_scores", 0]},
+                    "llm_recommendation": {"$arrayElemAt": ["$llm_score_data.read_recommendation", 0]}
+                }
+            },
+            # Sort by LLM score (ascending) - lowest scores first
+            {"$sort": {"llm_score": 1}},
+            # Take the bottom articles
+            {"$limit": limit * 3},  # Get 3x the requested limit
+            # Then take a random subset of the bottom matches for variety
+            {"$sample": {"size": limit}},
+            # Project to include only needed fields
+            {
+                "$project": {
+                    "_id": 0,
+                    "llm_score_data": 0
+                }
+            }
+        ]
+
+        articles = await db.later.aggregate(pipeline).to_list(length=limit)
+        
+        response = {
+            "count": len(articles),
+            "articles": articles
+        }
+
+        return response
+
+    except Exception as e:
+        logger.error(f"Error in get_llm_archive_candidates: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error retrieving LLM archive candidates: {str(e)}"
+        )

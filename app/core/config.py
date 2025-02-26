@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str
     CORS_ORIGINS: str
     READWISE_TOKEN: str
+    ANTHROPIC_API_KEY: str
 
     @property
     def CORS_ORIGINS_LIST(self) -> List[str]:
