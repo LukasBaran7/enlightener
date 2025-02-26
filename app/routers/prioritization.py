@@ -565,94 +565,56 @@ async def get_prioritization_sample(
     db: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """
-    Get a sample of articles with prioritization scores.
+    Get a random sample of articles from the 'later' collection that have scoring data.
 
-    Processes a larger sample of articles and returns the top N (default 10)
-    with highest priority scores. Also includes metadata about min/max scores.
+    Args:
+        limit: Number of articles to return
+        sample_size: Number of articles to sample from
+
+    Returns:
+        Dictionary with articles and metadata
     """
     try:
-        service = PrioritizationService(db)
+        # Query for random articles with scoring data
+        pipeline = [
+            {
+                "$match": {
+                    "priority_score": {"$exists": True},
+                    "component_scores": {"$exists": True},
+                }
+            },
+            {"$sample": {"size": sample_size}},
+            {"$sort": {"priority_score": -1}},  # Sort by priority score (descending)
+            {"$limit": limit},
+        ]
 
-        # Get random articles (larger sample)
-        articles = await service.get_random_articles_for_prioritization(sample_size)
+        cursor = db.later.aggregate(pipeline)
+        articles = await cursor.to_list(length=None)
 
-        # Separate articles with and without scores
-        articles_with_scores = []
-        articles_without_scores = []
-
+        # Format articles for response
+        formatted_articles = []
         for article in articles:
-            if "priority_score" in article and article["priority_score"] is not None:
-                articles_with_scores.append(article)
-            else:
-                articles_without_scores.append(article)
+            # Convert ObjectId to string
+            if "_id" in article and isinstance(article["_id"], str) is False:
+                article["_id"] = str(article["_id"])
 
-        # Log counts
-        logger.info(f"Found {len(articles_with_scores)} articles with existing scores")
-        logger.info(
-            f"Processing {len(articles_without_scores)} articles without scores"
-        )
+            formatted_articles.append(article)
 
-        # Process only articles without scores
-        if articles_without_scores:
-            # Extract content for articles
-            processed_articles = await service.extract_content_for_articles(
-                articles_without_scores
-            )
-
-            # Analyze readability
-            analyzed_articles = await service.analyze_readability(processed_articles)
-
-            # Analyze information density
-            analyzed_articles = await service.analyze_information_density(
-                analyzed_articles
-            )
-
-            # Analyze topic relevance
-            analyzed_articles = await service.analyze_topic_relevance(analyzed_articles)
-
-            # Analyze freshness
-            analyzed_articles = await service.analyze_freshness(analyzed_articles)
-
-            # Analyze engagement potential
-            analyzed_articles = await service.analyze_engagement_potential(
-                analyzed_articles
-            )
-
-            # Calculate priority scores
-            prioritized_articles = await service.calculate_priority_scores(
-                analyzed_articles
-            )
-
-            # Save results to database
-            await service.save_prioritization_results(prioritized_articles)
-            logger.info(
-                f"Saved prioritization results for {len(prioritized_articles)} articles"
-            )
-
-            # Combine with articles that already had scores
-            all_articles = articles_with_scores + prioritized_articles
-        else:
-            all_articles = articles_with_scores
-
-        # Format articles for output
-        formatted_articles = await service.format_prioritized_articles(all_articles)
-
-        # Get min and max scores from all processed articles
-        all_scores = [article["priority_score"] for article in formatted_articles]
+        # Calculate min and max scores for backward compatibility
+        all_scores = [
+            article.get("priority_score", 0) for article in formatted_articles
+        ]
         min_score = min(all_scores) if all_scores else 0
         max_score = max(all_scores) if all_scores else 0
 
-        # Take only the top N articles
-        top_articles = formatted_articles[:limit]
-
-        # Add metadata about scores
+        # Add metadata
         response = {
-            "articles": top_articles,
+            "articles": formatted_articles,
             "metadata": {
-                "total_processed": len(formatted_articles),
-                "min_score": min_score,
-                "max_score": max_score,
-                "returned_count": len(top_articles),
+                "total_processed": sample_size,  # Renamed from total_sampled for backward compatibility
+                "min_score": min_score,  # Added for backward compatibility
+                "max_score": max_score,  # Added for backward compatibility
+                "returned_count": len(formatted_articles),
             },
         }
 
@@ -667,140 +629,86 @@ async def get_prioritization_sample(
 
 @router.get("/low-priority", response_model=Dict[str, Any])
 async def get_low_priority_articles(
-    limit: int = Query(
-        default=10, ge=1, le=50, description="Number of articles to return"
-    ),
-    min_age_days: int = Query(
-        default=1095, ge=0, description="Minimum age of articles in days"
-    ),
+    min_age_days: int = Query(30, description="Minimum age of articles in days"),
+    limit: int = Query(10, description="Maximum number of articles to return"),
     db: AsyncIOMotorDatabase = Depends(get_database),
-):
+) -> Dict[str, Any]:
     """
-    Get articles that are candidates for archiving without reading.
+    Get articles that are candidates for archiving based on low priority.
 
-    Identifies articles with low priority scores, old publication dates,
-    failed content extraction, or other indicators that suggest they
-    may not be worth reading.
+    This endpoint uses the stored component_scores and other MongoDB fields
+    rather than calculating them on the fly.
+
+    Args:
+        min_age_days: Minimum age of articles in days to consider
+        limit: Maximum number of articles to return
+
+    Returns:
+        Dictionary with articles and metadata
     """
     try:
         service = PrioritizationService(db)
 
-        # Calculate the cutoff date based on min_age_days
+        # Calculate cutoff date
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=min_age_days)
         cutoff_timestamp = int(
             cutoff_date.timestamp() * 1000
         )  # Convert to milliseconds
 
-        # Query for low priority articles with specific criteria
+        # Query for low priority articles
         pipeline = [
             {
                 "$match": {
+                    # Only include articles with scoring data
+                    "priority_score": {"$exists": True},
+                    "component_scores": {"$exists": True},
                     "$or": [
-                        # Articles with low priority scores (using a fixed threshold)
+                        # Articles with low priority score
                         {"priority_score": {"$lte": 30.0}},
-                        # Articles with old publication dates
-                        {"published_date": {"$lt": cutoff_timestamp, "$ne": None}},
-                        # Articles with failed content extraction
-                        {"content_extraction_failed": True},
-                        # Articles with very low component scores
+                        # Articles with old publication date
+                        {"published_date": {"$lt": cutoff_timestamp}},
+                        # Articles with low component scores
                         {"component_scores.readability": {"$lte": 3.0}},
                         {"component_scores.information_density": {"$lte": 3.0}},
                         {"component_scores.topic_relevance": {"$lte": 3.0}},
-                        # Articles with broken URLs or missing content
-                        {"content": {"$in": [None, "", "<html>", "<body>"]}},
-                        # Minimal content length
-                        {"word_count": {"$lt": 300, "$ne": None}},
-                        # Long-term neglect (saved over 6 months ago, never opened)
+                        # Articles saved long ago but never opened
                         {
-                            "saved_at": {
-                                "$lt": datetime.now(timezone.utc) - timedelta(days=180)
-                            },
-                            "first_opened_at": None,
+                            "saved_at": {"$lt": cutoff_date},
+                            "first_opened_at": {"$exists": False},
                         },
-                        # Stale interest (not opened in over a year)
+                        # Articles not opened in a long time
                         {
                             "last_opened_at": {
                                 "$lt": datetime.now(timezone.utc) - timedelta(days=365)
                             }
                         },
-                        # Multiple abandoned attempts (opened multiple times but low progress)
-                        {
-                            "reading_progress": {"$lt": 0.2},
-                            "first_opened_at": {"$ne": None},
-                            "last_opened_at": {"$ne": None, "$ne": "$first_opened_at"},
-                        },
-                        # Missing critical metadata
-                        {
-                            "$or": [
-                                {"title": {"$in": [None, ""]}},
-                                {"author": {"$in": [None, ""]}},
-                                {"url": {"$in": [None, ""]}},
-                            ]
-                        },
-                        # Empty tags
-                        {"tags": {"$in": [None, {}, []]}},
-                    ]
+                    ],
                 }
             },
-            {"$sort": {"priority_score": 1}},  # Sort by priority score ascending
-            {"$limit": limit * 2},  # Get more than needed for processing
+            # First get a larger sample of matching articles
+            {
+                "$sample": {"size": limit * 3}
+            },  # Get 3x the requested limit for more variety
+            # Sort by priority score (ascending)
+            {"$sort": {"priority_score": 1}},
+            # Then take a random subset of the top matches
+            {"$sample": {"size": limit}},
         ]
 
         cursor = db.later.aggregate(pipeline)
         articles = await cursor.to_list(length=None)
 
-        # Process articles without scores if needed
-        articles_with_scores = []
-        articles_without_scores = []
-
+        # Format articles for response
+        formatted_articles = []
         for article in articles:
-            if "priority_score" in article and article["priority_score"] is not None:
-                articles_with_scores.append(article)
-            else:
-                articles_without_scores.append(article)
+            # Convert ObjectId to string
+            if "_id" in article and isinstance(article["_id"], str) is False:
+                article["_id"] = str(article["_id"])
 
-        # Process articles without scores
-        if articles_without_scores:
-            # Extract content for articles
-            processed_articles = await service.extract_content_for_articles(
-                articles_without_scores
-            )
-
-            # Run all analysis steps
-            analyzed_articles = await service.analyze_readability(processed_articles)
-            analyzed_articles = await service.analyze_information_density(
-                analyzed_articles
-            )
-            analyzed_articles = await service.analyze_topic_relevance(analyzed_articles)
-            analyzed_articles = await service.analyze_freshness(analyzed_articles)
-            analyzed_articles = await service.analyze_engagement_potential(
-                analyzed_articles
-            )
-
-            # Calculate priority scores
-            prioritized_articles = await service.calculate_priority_scores(
-                analyzed_articles
-            )
-
-            # Save results to database
-            await service.save_prioritization_results(prioritized_articles)
-
-            # Combine with articles that already had scores
-            all_articles = articles_with_scores + prioritized_articles
-        else:
-            all_articles = articles_with_scores
-
-        # Format articles for output
-        formatted_articles = await service.format_prioritized_articles(all_articles)
-
-        # Sort by priority score (ascending) to get the lowest scores first
-        formatted_articles.sort(key=lambda x: x["priority_score"])
-
-        # Add archive recommendation reason
-        for article in formatted_articles:
+            # Add archive recommendation reason
             reasons = []
 
-            # Check for low priority score (using fixed threshold of 30.0)
+            # Check for low priority score
             if article.get("priority_score", 100) <= 30.0:
                 reasons.append("low_priority_score")
 
@@ -862,16 +770,14 @@ async def get_low_priority_articles(
 
             # Add reasons to article
             article["archive_reasons"] = reasons
-
-        # Take only the top N articles
-        top_low_priority = formatted_articles[:limit]
+            formatted_articles.append(article)
 
         # Add metadata about scores
         response = {
-            "articles": top_low_priority,
+            "articles": formatted_articles,
             "metadata": {
                 "total_processed": len(formatted_articles),
-                "returned_count": len(top_low_priority),
+                "returned_count": len(formatted_articles),
                 "criteria": {
                     "min_age_days": min_age_days,
                 },
