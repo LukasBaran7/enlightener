@@ -5,6 +5,7 @@ from app.models.article import Article
 from app.core.config import get_database
 from app.services.content_extractor import ContentExtractor
 from app.services.readability_analyzer import ReadabilityAnalyzer
+from app.services.information_density_analyzer import InformationDensityAnalyzer
 from bson import ObjectId
 import logging
 
@@ -17,6 +18,7 @@ class PrioritizationService:
         self.db = db
         self.content_extractor = ContentExtractor()
         self.readability_analyzer = ReadabilityAnalyzer()
+        self.information_density_analyzer = InformationDensityAnalyzer()
 
     async def get_random_articles_for_prioritization(
         self, limit: int = 10
@@ -116,6 +118,40 @@ class PrioritizationService:
 
         return articles
 
+    async def analyze_information_density(
+        self, articles: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Analyze information density for a list of articles with extracted content.
+
+        Args:
+            articles: List of article documents with extracted content
+
+        Returns:
+            List of articles with information density metrics
+        """
+        for article in articles:
+            content = article.get("extracted_content", "")
+            if content:
+                # Analyze information density
+                info_density_metrics = self.information_density_analyzer.analyze(
+                    content
+                )
+
+                # Add information density metrics to article
+                article["information_density"] = info_density_metrics
+            else:
+                # Default metrics for articles without content
+                article["information_density"] = {
+                    "lexical_diversity": 0,
+                    "fact_density": 0,
+                    "concept_density": 0,
+                    "key_concepts": [],
+                    "normalized_score": 5.0,
+                }
+
+        return articles
+
 
 @router.get("/sample", response_model=List[Dict[str, Any]])
 async def get_prioritization_sample(
@@ -138,6 +174,9 @@ async def get_prioritization_sample(
 
         # Analyze readability
         analyzed_articles = await service.analyze_readability(processed_articles)
+
+        # Analyze information density
+        analyzed_articles = await service.analyze_information_density(analyzed_articles)
 
         # Convert ObjectId to string for JSON serialization
         for article in analyzed_articles:
