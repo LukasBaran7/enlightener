@@ -27,6 +27,16 @@ class PrioritizationService:
         self.freshness_analyzer = FreshnessAnalyzer()
         self.engagement_analyzer = EngagementAnalyzer()
 
+        # Define component weights according to the spec
+        self.component_weights = {
+            "quality": 0.25,
+            "information_density": 0.15,
+            "readability": 0.15,
+            "topic_relevance": 0.20,
+            "freshness": 0.10,
+            "engagement_potential": 0.15,
+        }
+
     async def get_random_articles_for_prioritization(
         self, limit: int = 10
     ) -> List[Dict[str, Any]]:
@@ -293,6 +303,119 @@ class PrioritizationService:
 
         return articles
 
+    async def calculate_priority_scores(
+        self, articles: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Calculate the final priority score for each article based on component scores.
+
+        Args:
+            articles: List of article documents with all component metrics
+
+        Returns:
+            List of articles with priority scores
+        """
+        for article in articles:
+            # Initialize component scores dictionary
+            component_scores = {}
+
+            # Get quality score (placeholder - to be implemented)
+            # For now, use a default value of 7.0
+            component_scores["quality"] = 7.0
+
+            # Get information density score
+            if "information_density" in article:
+                component_scores["information_density"] = article[
+                    "information_density"
+                ].get("normalized_score", 5.0)
+            else:
+                component_scores["information_density"] = 5.0
+
+            # Get readability score
+            if "readability" in article:
+                component_scores["readability"] = article["readability"].get(
+                    "normalized_score", 5.0
+                )
+            else:
+                component_scores["readability"] = 5.0
+
+            # Get topic relevance score
+            if "topic_relevance" in article:
+                component_scores["topic_relevance"] = article["topic_relevance"].get(
+                    "normalized_score", 5.0
+                )
+            else:
+                component_scores["topic_relevance"] = 5.0
+
+            # Get freshness score
+            if "freshness" in article:
+                component_scores["freshness"] = article["freshness"].get(
+                    "normalized_score", 5.0
+                )
+            else:
+                component_scores["freshness"] = 5.0
+
+            # Get engagement potential score
+            if "engagement_potential" in article:
+                component_scores["engagement_potential"] = article[
+                    "engagement_potential"
+                ].get("normalized_score", 5.0)
+            else:
+                component_scores["engagement_potential"] = 5.0
+
+            # Calculate weighted sum according to the formula in the spec
+            priority_score = (
+                sum(
+                    score * self.component_weights[component]
+                    for component, score in component_scores.items()
+                )
+                * 10
+            )  # Scale to 0-100
+
+            # Add priority score and component scores to article
+            article["priority_score"] = round(priority_score, 1)
+            article["component_scores"] = component_scores
+
+        return articles
+
+    async def format_prioritized_articles(
+        self, articles: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Format the prioritized articles according to the output format in the spec.
+
+        Args:
+            articles: List of article documents with priority scores
+
+        Returns:
+            List of formatted article results
+        """
+        formatted_articles = []
+
+        for article in articles:
+            formatted_article = {
+                "article_id": str(article.get("_id", "")),
+                "title": article.get("title", ""),
+                "url": article.get("url", ""),
+                "word_count": article.get("word_count", 0),
+                "priority_score": article.get("priority_score", 0),
+                "component_scores": article.get("component_scores", {}),
+                # Include additional fields from MongoDB that might be useful for frontend
+                "author": article.get("author", ""),
+                "source": article.get("source", ""),
+                "site_name": article.get("site_name", ""),
+                "image_url": article.get("image_url", ""),
+                "saved_at": article.get("saved_at", ""),
+                "reading_progress": article.get("reading_progress", 0),
+            }
+
+            formatted_articles.append(formatted_article)
+
+        # Sort articles by priority score in descending order
+        formatted_articles.sort(key=lambda x: x["priority_score"], reverse=True)
+
+        return formatted_articles
+
 
 @router.get("/sample", response_model=List[Dict[str, Any]])
 async def get_prioritization_sample(
@@ -330,12 +453,17 @@ async def get_prioritization_sample(
             analyzed_articles
         )
 
-        # Convert ObjectId to string for JSON serialization
-        for article in analyzed_articles:
-            if "_id" in article:
-                article["_id"] = str(article["_id"])
+        # Calculate priority scores
+        prioritized_articles = await service.calculate_priority_scores(
+            analyzed_articles
+        )
 
-        return analyzed_articles
+        # Format articles for output
+        formatted_articles = await service.format_prioritized_articles(
+            prioritized_articles
+        )
+
+        return formatted_articles
 
     except Exception as e:
         logger.error(f"Error in get_prioritization_sample: {str(e)}")
