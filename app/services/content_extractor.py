@@ -10,9 +10,10 @@ logger = logging.getLogger(__name__)
 class ContentExtractor:
     """
     Extracts and processes content from articles using a fallback strategy:
-    1. Fetch and parse content from source_url using trafilatura
-    2. Use content field if available
-    3. Use summary field if no other content is accessible
+    1. Use HTML content from html_content attribute if available (from later_html collection)
+    2. Fetch and parse content from source_url using trafilatura
+    3. Use content field if available
+    4. Use summary field if no other content is accessible
     """
 
     def __init__(self, timeout: int = 10):
@@ -34,6 +35,20 @@ class ContentExtractor:
         Returns:
             Extracted content as string or None if no content could be extracted
         """
+        # Strategy 0: Use HTML content from html_content attribute (from later_html collection)
+        if hasattr(article, "html_content") and article.html_content:
+            try:
+                content = trafilatura.extract(article.html_content)
+                if content:
+                    logger.info(
+                        f"Content extracted from later_html for article {article.id}"
+                    )
+                    return content
+            except Exception as e:
+                logger.warning(
+                    f"Failed to extract content from later_html for article {article.id}: {str(e)}"
+                )
+
         # Strategy 1: Fetch from source_url using trafilatura
         if article.source_url:
             try:
