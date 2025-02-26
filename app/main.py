@@ -1,7 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import reader, podcast
+from app.routers import reader, podcast, prioritization
 from app.core.config import get_settings
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
 
 settings = get_settings()
 
@@ -22,6 +29,7 @@ app.add_middleware(
 
 app.include_router(reader.router)
 app.include_router(podcast.router)
+app.include_router(prioritization.router)
 
 
 @app.get("/")
