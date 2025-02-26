@@ -45,9 +45,7 @@ class ContentExtractor:
                     return content
             except Exception as e:
                 logger.warning(
-                    f"Failed to extract content from source_url for article {
-                        article.id}: {
-                        str(e)}"
+                    f"Failed to extract content from source_url for article {article.id}: {str(e)}"
                 )
 
         # Strategy 2: Use content field if available
@@ -86,8 +84,7 @@ class ContentExtractor:
             return None
         except httpx.HTTPStatusError as e:
             logger.warning(
-                f"HTTP error while fetching content from {url}: {
-                    e.response.status_code}"
+                f"HTTP error while fetching content from {url}: {e.response.status_code}"
             )
             return None
         except Exception as e:
