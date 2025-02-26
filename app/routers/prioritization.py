@@ -396,6 +396,11 @@ class PrioritizationService:
             # Convert ObjectId to string if present
             article_id = str(article.get("_id", "")) if article.get("_id") else ""
 
+            # Ensure tags is always a dictionary
+            tags = article.get("tags", {})
+            if tags is None:
+                tags = {}
+
             formatted_article = {
                 # Original MongoDB fields
                 "_id": article_id,
@@ -406,7 +411,7 @@ class PrioritizationService:
                 "source": article.get("source", ""),
                 "category": article.get("category", ""),
                 "location": article.get("location", ""),
-                "tags": article.get("tags", {}),
+                "tags": tags,  # Use the validated tags value
                 "site_name": article.get("site_name", ""),
                 "word_count": article.get("word_count", 0),
                 "created_at": article.get("created_at", None),
@@ -437,21 +442,30 @@ class PrioritizationService:
         return formatted_articles
 
 
-@router.get("/sample", response_model=List[Dict[str, Any]])
+@router.get("/sample", response_model=Dict[str, Any])
 async def get_prioritization_sample(
     limit: int = Query(
-        default=10, ge=1, le=20, description="Number of articles to sample"
+        default=10, ge=1, le=20, description="Number of articles to return"
+    ),
+    sample_size: int = Query(
+        default=25,
+        ge=10,
+        le=200,
+        description="Number of articles to sample and process",
     ),
     db: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """
-    Get a sample of articles with extracted content for prioritization testing.
+    Get a sample of articles with prioritization scores.
+
+    Processes a larger sample (default 100) of articles and returns the top N (default 10)
+    with highest priority scores. Also includes metadata about min/max scores.
     """
     try:
         service = PrioritizationService(db)
 
-        # Get random articles
-        articles = await service.get_random_articles_for_prioritization(limit)
+        # Get random articles (larger sample)
+        articles = await service.get_random_articles_for_prioritization(sample_size)
 
         # Extract content for articles
         processed_articles = await service.extract_content_for_articles(articles)
@@ -483,7 +497,26 @@ async def get_prioritization_sample(
             prioritized_articles
         )
 
-        return formatted_articles
+        # Get min and max scores from all processed articles
+        all_scores = [article["priority_score"] for article in formatted_articles]
+        min_score = min(all_scores) if all_scores else 0
+        max_score = max(all_scores) if all_scores else 0
+
+        # Take only the top N articles
+        top_articles = formatted_articles[:limit]
+
+        # Add metadata about scores
+        response = {
+            "articles": top_articles,
+            "metadata": {
+                "total_processed": len(formatted_articles),
+                "min_score": min_score,
+                "max_score": max_score,
+                "returned_count": len(top_articles),
+            },
+        }
+
+        return response
 
     except Exception as e:
         logger.error(f"Error in get_prioritization_sample: {str(e)}")
