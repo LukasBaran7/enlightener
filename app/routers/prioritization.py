@@ -566,11 +566,11 @@ async def get_prioritization_sample(
 ):
     """
     Get a random sample of articles from the 'later' collection that have scoring data.
-    
+
     Args:
         limit: Number of articles to return
         sample_size: Number of articles to sample from
-        
+
     Returns:
         Dictionary with articles and metadata
     """
@@ -580,44 +580,46 @@ async def get_prioritization_sample(
             {
                 "$match": {
                     "priority_score": {"$exists": True},
-                    "component_scores": {"$exists": True}
+                    "component_scores": {"$exists": True},
                 }
             },
             {"$sample": {"size": sample_size}},
             {"$sort": {"priority_score": -1}},  # Sort by priority score (descending)
-            {"$limit": limit}
+            {"$limit": limit},
         ]
-        
+
         cursor = db.later.aggregate(pipeline)
         articles = await cursor.to_list(length=None)
-        
+
         # Format articles for response
         formatted_articles = []
         for article in articles:
             # Convert ObjectId to string
             if "_id" in article and isinstance(article["_id"], str) is False:
                 article["_id"] = str(article["_id"])
-            
+
             formatted_articles.append(article)
-        
+
         # Calculate min and max scores for backward compatibility
-        all_scores = [article.get("priority_score", 0) for article in formatted_articles]
+        all_scores = [
+            article.get("priority_score", 0) for article in formatted_articles
+        ]
         min_score = min(all_scores) if all_scores else 0
         max_score = max(all_scores) if all_scores else 0
-        
+
         # Add metadata
         response = {
             "articles": formatted_articles,
             "metadata": {
                 "total_processed": sample_size,  # Renamed from total_sampled for backward compatibility
-                "min_score": min_score,          # Added for backward compatibility
-                "max_score": max_score,          # Added for backward compatibility
+                "min_score": min_score,  # Added for backward compatibility
+                "max_score": max_score,  # Added for backward compatibility
                 "returned_count": len(formatted_articles),
             },
         }
-        
+
         return response
-        
+
     except Exception as e:
         logger.error(f"Error in get_prioritization_sample: {str(e)}")
         raise HTTPException(
@@ -633,24 +635,26 @@ async def get_low_priority_articles(
 ) -> Dict[str, Any]:
     """
     Get articles that are candidates for archiving based on low priority.
-    
+
     This endpoint uses the stored component_scores and other MongoDB fields
     rather than calculating them on the fly.
-    
+
     Args:
         min_age_days: Minimum age of articles in days to consider
         limit: Maximum number of articles to return
-        
+
     Returns:
         Dictionary with articles and metadata
     """
     try:
         service = PrioritizationService(db)
-        
+
         # Calculate cutoff date
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=min_age_days)
-        cutoff_timestamp = int(cutoff_date.timestamp() * 1000)  # Convert to milliseconds
-        
+        cutoff_timestamp = int(
+            cutoff_date.timestamp() * 1000
+        )  # Convert to milliseconds
+
         # Query for low priority articles
         pipeline = [
             {
@@ -661,46 +665,46 @@ async def get_low_priority_articles(
                     "$or": [
                         # Articles with low priority score
                         {"priority_score": {"$lte": 30.0}},
-                        
                         # Articles with old publication date
                         {"published_date": {"$lt": cutoff_timestamp}},
-                        
                         # Articles with low component scores
                         {"component_scores.readability": {"$lte": 3.0}},
                         {"component_scores.information_density": {"$lte": 3.0}},
                         {"component_scores.topic_relevance": {"$lte": 3.0}},
-                        
                         # Articles saved long ago but never opened
                         {
                             "saved_at": {"$lt": cutoff_date},
-                            "first_opened_at": {"$exists": False}
+                            "first_opened_at": {"$exists": False},
                         },
-                        
                         # Articles not opened in a long time
                         {
-                            "last_opened_at": {"$lt": datetime.now(timezone.utc) - timedelta(days=365)}
-                        }
-                    ]
+                            "last_opened_at": {
+                                "$lt": datetime.now(timezone.utc) - timedelta(days=365)
+                            }
+                        },
+                    ],
                 }
             },
             # First get a larger sample of matching articles
-            {"$sample": {"size": limit * 3}},  # Get 3x the requested limit for more variety
+            {
+                "$sample": {"size": limit * 3}
+            },  # Get 3x the requested limit for more variety
             # Sort by priority score (ascending)
             {"$sort": {"priority_score": 1}},
             # Then take a random subset of the top matches
             {"$sample": {"size": limit}},
         ]
-        
+
         cursor = db.later.aggregate(pipeline)
         articles = await cursor.to_list(length=None)
-        
+
         # Format articles for response
         formatted_articles = []
         for article in articles:
             # Convert ObjectId to string
             if "_id" in article and isinstance(article["_id"], str) is False:
                 article["_id"] = str(article["_id"])
-                
+
             # Add archive recommendation reason
             reasons = []
 
