@@ -164,7 +164,7 @@ class EngagementAnalyzer:
         # Detect language
         try:
             language = langdetect.detect(content)
-        except:
+        except BaseException:
             # Default to English if detection fails
             language = "en"
 

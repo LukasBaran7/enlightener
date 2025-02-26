@@ -37,7 +37,8 @@ class FreshnessAnalyzer:
             "news": 3,  # News becomes outdated very quickly
             "technology": 90,  # Tech content has medium-term relevance
             "science": 365,  # Scientific content stays relevant longer
-            "evergreen": 1095,  # Evergreen content (like guides) stays relevant for years
+            # Evergreen content (like guides) stays relevant for years
+            "evergreen": 1095,
             "reference": 1825,  # Reference material has very long relevance
             "default": 180,  # Default decay rate for uncategorized content
         }
@@ -132,7 +133,8 @@ class FreshnessAnalyzer:
         Returns:
             Normalized score from 1-10
         """
-        # If we don't have a publication date, base score primarily on temporal references
+        # If we don't have a publication date, base score primarily on temporal
+        # references
         if age_days == 0:
             # Scale based on temporal references (0-10 references maps to 5-8 score)
             temporal_score = 5 + min(3, temporal_references_count * 0.3)

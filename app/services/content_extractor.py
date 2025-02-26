@@ -91,7 +91,5 @@ class ContentExtractor:
             )
             return None
         except Exception as e:
-            logger.error(
-                f"Failed to extract content from source_url for article {article.id}: {str(e)}"
-            )
+            logger.error(f"Failed to extract content from source_url: {str(e)}")
             return None
