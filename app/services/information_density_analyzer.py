@@ -43,16 +43,22 @@ class InformationDensityAnalyzer:
             # English patterns
             r"\b\d+(?:\.\d+)?%\b",  # Percentages
             r"\b\d+(?:,\d+)*(?:\.\d+)?\b",  # Numbers
-            r"\b(?:in|during|since|before|after|around)\s+\d{4}\b",  # Years with context
-            r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:st|nd|rd|th)?,\s+\d{4}\b",  # Dates
+            # Years with context
+            r"\b(?:in|during|since|before|after|around)\s+\d{4}\b",
+            # Dates
+            r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:st|nd|rd|th)?,\s+\d{4}\b",
             r"\$\d+(?:,\d+)*(?:\.\d+)?\b",  # Dollar amounts
-            r"\b\d+(?:,\d+)*\s+(?:people|users|customers|patients|students)\b",  # Quantities of people
-            r"\b(?:according to|cited by|reported by|study by|research by|survey by)\b",  # Citations
+            # Quantities of people
+            r"\b\d+(?:,\d+)*\s+(?:people|users|customers|patients|students)\b",
+            # Citations
+            r"\b(?:according to|cited by|reported by|study by|research by|survey by)\b",
             # Polish patterns
             r"\b\d+(?:,\d+)*\s+(?:zł|PLN)\b",  # Polish currency
-            r"\b(?:styczeń|luty|marzec|kwiecień|maj|czerwiec|lipiec|sierpień|wrzesień|październik|listopad|grudzień)\s+\d{4}\b",  # Polish months with year
+            # Polish months with year
+            r"\b(?:styczeń|luty|marzec|kwiecień|maj|czerwiec|lipiec|sierpień|wrzesień|październik|listopad|grudzień)\s+\d{4}\b",
             r"\b(?:w|podczas|od|do|przed|po)\s+\d{4}\b",  # Polish years with context
-            r"\b\d+(?:,\d+)*\s+(?:osób|ludzi|pracowników|studentów|pacjentów)\b",  # Polish quantities of people
+            # Polish quantities of people
+            r"\b\d+(?:,\d+)*\s+(?:osób|ludzi|pracowników|studentów|pacjentów)\b",
             r"\b(?:według|zgodnie z|jak podaje|badania|raport)\b",  # Polish citations
         ]
         self.fact_patterns = [
