@@ -393,20 +393,40 @@ class PrioritizationService:
         formatted_articles = []
 
         for article in articles:
+            # Convert ObjectId to string if present
+            article_id = str(article.get("_id", "")) if article.get("_id") else ""
+
             formatted_article = {
-                "article_id": str(article.get("_id", "")),
-                "title": article.get("title", ""),
+                # Original MongoDB fields
+                "_id": article_id,
+                "id": article.get("id", ""),
                 "url": article.get("url", ""),
-                "word_count": article.get("word_count", 0),
-                "priority_score": article.get("priority_score", 0),
-                "component_scores": article.get("component_scores", {}),
-                # Include additional fields from MongoDB that might be useful for frontend
+                "title": article.get("title", ""),
                 "author": article.get("author", ""),
                 "source": article.get("source", ""),
+                "category": article.get("category", ""),
+                "location": article.get("location", ""),
+                "tags": article.get("tags", {}),
                 "site_name": article.get("site_name", ""),
+                "word_count": article.get("word_count", 0),
+                "created_at": article.get("created_at", None),
+                "updated_at": article.get("updated_at", None),
+                "published_date": article.get("published_date", 0),
+                "summary": article.get("summary", ""),
                 "image_url": article.get("image_url", ""),
-                "saved_at": article.get("saved_at", ""),
+                "content": article.get("content", ""),
+                "source_url": article.get("source_url", ""),
+                "notes": article.get("notes", ""),
+                "parent_id": article.get("parent_id", None),
                 "reading_progress": article.get("reading_progress", 0),
+                "first_opened_at": article.get("first_opened_at", None),
+                "last_opened_at": article.get("last_opened_at", None),
+                "saved_at": article.get("saved_at", None),
+                "last_moved_at": article.get("last_moved_at", None),
+                # Prioritization fields
+                "article_id": article_id,  # Duplicate for backward compatibility
+                "priority_score": article.get("priority_score", 0),
+                "component_scores": article.get("component_scores", {}),
             }
 
             formatted_articles.append(formatted_article)
