@@ -12,6 +12,7 @@ from pydantic import BaseModel
 import asyncio
 from datetime import datetime, timezone
 from bs4 import BeautifulSoup  # Add this for better HTML parsing
+import time
 
 router = APIRouter(prefix="/llm-scoring", tags=["llm-scoring"])
 logger = logging.getLogger(__name__)
@@ -33,11 +34,55 @@ class LLMScoringResponse(BaseModel):
     read_recommendation: str
 
 
+# Simple rate limiter for Anthropic API
+class AnthropicRateLimiter:
+    def __init__(self, tokens_per_minute=20000):
+        self.tokens_per_minute = tokens_per_minute
+        self.tokens_sent = 0
+        self.reset_time = time.time() + 60
+        self.lock = asyncio.Lock()
+    
+    async def check_and_wait(self, tokens: int) -> None:
+        """
+        Check if sending these tokens would exceed the rate limit.
+        If so, wait until the next minute.
+        
+        Args:
+            tokens: Number of tokens to send
+        """
+        async with self.lock:
+            current_time = time.time()
+            
+            # Reset counter if a minute has passed
+            if current_time >= self.reset_time:
+                self.tokens_sent = 0
+                self.reset_time = current_time + 60
+                logger.info("Anthropic rate limit counter reset")
+            
+            # Check if adding these tokens would exceed the limit
+            if self.tokens_sent + tokens > self.tokens_per_minute:
+                # Calculate wait time until reset
+                wait_time = self.reset_time - current_time
+                logger.warning(f"Anthropic API rate limit would be exceeded. Waiting {wait_time:.2f} seconds for reset.")
+                await asyncio.sleep(wait_time)
+                
+                # Reset counter after waiting
+                self.tokens_sent = 0
+                self.reset_time = time.time() + 60
+            
+            # Add tokens to counter
+            self.tokens_sent += tokens
+            logger.info(f"Anthropic API tokens used in current minute: {self.tokens_sent}/{self.tokens_per_minute}")
+
+
 class LLMScoringService:
     """
     Service for scoring articles using LLM capabilities to evaluate content quality,
     information density, and other factors that require semantic understanding.
     """
+
+    # Class-level rate limiter for Anthropic API
+    _anthropic_rate_limiter = AnthropicRateLimiter()
 
     def __init__(self, db: AsyncIOMotorDatabase):
         self.db = db
@@ -53,7 +98,7 @@ class LLMScoringService:
         if self.llm_service == "openai":
             self.default_model = "gpt-4o"
         else:
-            self.default_model = "claude-3-7-sonnet-latest"
+            self.default_model = "claude-3-5-haiku-latest"
 
     async def get_article_by_id(self, article_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -139,42 +184,87 @@ class LLMScoringService:
 
         logger.info(f"Fetching article {article_id} from Readwise API")
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(
-                "https://readwise.io/api/v3/list/", headers=headers, params=params
-            )
+        max_retries = 3
+        retry_count = 0
+        base_wait_time = 1  # Start with 1 second
 
-            if response.status_code != 200:
-                logger.error(f"Readwise API error: {response.text}")
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"Readwise API error: {response.text}",
-                )
+        while retry_count <= max_retries:
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.get(
+                        "https://readwise.io/api/v3/list/", headers=headers, params=params
+                    )
 
-            data = response.json()
+                    # Handle rate limiting (429 Too Many Requests)
+                    if response.status_code == 429:
+                        retry_after = int(response.headers.get("Retry-After", base_wait_time))
+                        wait_time = retry_after if retry_after else base_wait_time * (2 ** retry_count)
+                        
+                        logger.warning(
+                            f"Rate limit exceeded (429). Retrying after {wait_time} seconds. "
+                            f"Attempt {retry_count + 1}/{max_retries + 1}"
+                        )
+                        
+                        await asyncio.sleep(wait_time)
+                        retry_count += 1
+                        continue
 
-            if not data.get("results") or len(data["results"]) == 0:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Article {article_id} not found in Readwise",
-                )
+                    if response.status_code != 200:
+                        logger.error(f"Readwise API error: {response.text}")
+                        raise HTTPException(
+                            status_code=response.status_code,
+                            detail=f"Readwise API error: {response.text}",
+                        )
 
-            # Get the first (and should be only) result
-            readwise_article = data["results"][0]
+                    data = response.json()
 
-            # Merge with our database article
-            merged_article = {**article}
+                    if not data.get("results") or len(data["results"]) == 0:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"Article {article_id} not found in Readwise",
+                        )
 
-            # Update with Readwise data
-            if "html_content" in readwise_article:
-                merged_article["content"] = readwise_article["html_content"]
+                    # Get the first (and should be only) result
+                    readwise_article = data["results"][0]
 
-            # Update other fields if needed
-            for field in ["title", "author", "word_count", "summary"]:
-                if field in readwise_article and readwise_article[field]:
-                    merged_article[field] = readwise_article[field]
+                    # Merge with our database article
+                    merged_article = {**article}
 
-            return merged_article
+                    # Update with Readwise data
+                    if "html_content" in readwise_article:
+                        merged_article["content"] = readwise_article["html_content"]
+
+                    # Update other fields if needed
+                    for field in ["title", "author", "word_count", "summary"]:
+                        if field in readwise_article and readwise_article[field]:
+                            merged_article[field] = readwise_article[field]
+
+                    return merged_article
+                    
+            except httpx.RequestError as e:
+                # Handle network errors with retry logic
+                retry_count += 1
+                wait_time = base_wait_time * (2 ** retry_count)
+                
+                if retry_count <= max_retries:
+                    logger.warning(
+                        f"Network error when calling Readwise API: {str(e)}. "
+                        f"Retrying in {wait_time} seconds. Attempt {retry_count}/{max_retries + 1}"
+                    )
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"Failed to fetch from Readwise API after {max_retries + 1} attempts: {str(e)}")
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"Failed to connect to Readwise API after multiple attempts: {str(e)}"
+                    )
+        
+        # If we've exhausted all retries
+        logger.error(f"Failed to fetch from Readwise API after {max_retries + 1} attempts due to rate limiting")
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded when calling Readwise API. Please try again later."
+        )
 
     # Function to estimate token count (rough approximation)
     def estimate_token_count(self, text: str) -> int:
@@ -267,24 +357,31 @@ WORD COUNT: {article.get("word_count", 0)}
 
 I need you to evaluate this article for its reading priority using the following specific criteria:
 
-1. INFORMATION DENSITY (1-10): How much unique, valuable information is provided per paragraph. High scores have substantial insights in each paragraph.
+1. INFORMATION DENSITY (1-10): How much unique, valuable information is provided per paragraph. High scores have substantial insights in each paragraph. Be critical - most articles should score between 4-7 on this scale.
 
-2. PRACTICAL VALUE (1-10): How actionable or applicable the content is. Can readers apply these insights in their work/life?
+2. PRACTICAL VALUE (1-10): How actionable or applicable the content is. Can readers apply these insights in their work/life? Consider whether the article provides concrete steps or merely theoretical concepts. Most articles should score between 4-7 on this scale.
 
-3. DEPTH OF ANALYSIS (1-10): How deeply the article explores its subject. Does it provide surface coverage or deep insights?
+3. DEPTH OF ANALYSIS (1-10): How deeply the article explores its subject. Does it provide surface coverage or deep insights? Consider whether the article addresses complexities and nuances or stays at a superficial level. Most articles should score between 4-7 on this scale.
 
-4. UNIQUENESS (1-10): How original or novel are the ideas presented? Is this information available elsewhere?
+4. UNIQUENESS (1-10): How original or novel are the ideas presented? Is this information available elsewhere? Consider whether the article provides fresh perspectives or merely repeats common knowledge. Most articles should score between 4-7 on this scale.
 
-5. LONGEVITY (1-10): How long will this information remain valuable? Timeless content scores higher than time-sensitive content.
+5. LONGEVITY (1-10): How long will this information remain valuable? Timeless content scores higher than time-sensitive content. Consider whether the article will be relevant in 1, 5, or 10+ years. Most articles should score between 4-7 on this scale.
+
+IMPORTANT: Be critical and discerning in your evaluation. Reserve scores of 8-10 for truly exceptional content, and don't hesitate to use the lower end of the scale (1-3) for content that is lacking. A typical article of average quality should score around 5-6 on each criterion.
 
 ARTICLE CONTENT:
 {truncated_content}
 
 Based on your evaluation, provide:
 1. A score for each criterion (1-10)
-2. An overall priority score (1-100)
+2. An overall priority score (1-100) that reflects the article's true value. The overall score should follow a normal distribution where:
+   - 0-20: Very low quality/priority
+   - 21-40: Below average quality/priority
+   - 41-60: Average quality/priority
+   - 61-80: Above average quality/priority
+   - 81-100: Exceptional quality/priority (reserve for truly outstanding content)
 3. A brief analysis of the article's strengths and weaknesses (max 150 words)
-4. A clear read/skip recommendation
+4. A clear read/skip recommendation with reasoning
 
 Format your response as a JSON object like this:
 {{
@@ -342,9 +439,12 @@ Format your response as a JSON object like this:
             "content-type": "application/json",
         }
 
-        # Estimate token count for logging
+        # Estimate token count for logging and rate limiting
         estimated_tokens = self.estimate_token_count(prompt)
         logger.info(f"Calling Anthropic API with estimated {estimated_tokens} tokens")
+        
+        # Check rate limit and wait if necessary
+        await self._anthropic_rate_limiter.check_and_wait(estimated_tokens)
 
         data = {
             "model": self.default_model,
@@ -353,46 +453,91 @@ Format your response as a JSON object like this:
             "temperature": 0.2,  # Low temperature for more consistent evaluations
         }
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                "https://api.anthropic.com/v1/messages", headers=headers, json=data
-            )
+        max_retries = 3
+        retry_count = 0
+        base_wait_time = 1  # Start with 1 second
 
-            if response.status_code != 200:
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"Anthropic API error: {response.text}",
-                )
-
-            response_data = response.json()
-
-            # Log token usage if available in the response
-            if "usage" in response_data:
-                input_tokens = response_data["usage"].get("input_tokens", 0)
-                output_tokens = response_data["usage"].get("output_tokens", 0)
-                total_tokens = input_tokens + output_tokens
-                logger.info(
-                    f"Anthropic API token usage: {input_tokens} input + {output_tokens} output = {total_tokens} total"
-                )
-
-            response_text = response_data["content"][0]["text"]
-
-            # Extract JSON from response
+        while retry_count <= max_retries:
             try:
-                # Find JSON in response (might be wrapped in markdown code blocks)
-                json_match = re.search(
-                    r"```(?:json)?\s*({.*?})\s*```", response_text, re.DOTALL
-                )
-                if json_match:
-                    json_str = json_match.group(1)
-                else:
-                    # Try to find JSON without code blocks
-                    json_str = re.search(r"{.*}", response_text, re.DOTALL).group(0)
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    response = await client.post(
+                        "https://api.anthropic.com/v1/messages", headers=headers, json=data
+                    )
 
-                return json.loads(json_str)
-            except Exception as e:
-                logger.error(f"Error parsing Claude response as JSON: {str(e)}")
-                raise ValueError(f"Failed to parse Claude response as JSON: {str(e)}")
+                    # Handle rate limiting (429 Too Many Requests)
+                    if response.status_code == 429:
+                        retry_after = int(response.headers.get("Retry-After", base_wait_time))
+                        wait_time = retry_after if retry_after else base_wait_time * (2 ** retry_count)
+                        
+                        logger.warning(
+                            f"Anthropic API rate limit exceeded (429). Retrying after {wait_time} seconds. "
+                            f"Attempt {retry_count + 1}/{max_retries + 1}"
+                        )
+                        
+                        await asyncio.sleep(wait_time)
+                        retry_count += 1
+                        continue
+
+                    if response.status_code != 200:
+                        raise HTTPException(
+                            status_code=response.status_code,
+                            detail=f"Anthropic API error: {response.text}",
+                        )
+
+                    response_data = response.json()
+
+                    # Log token usage if available in the response
+                    if "usage" in response_data:
+                        input_tokens = response_data["usage"].get("input_tokens", 0)
+                        output_tokens = response_data["usage"].get("output_tokens", 0)
+                        total_tokens = input_tokens + output_tokens
+                        logger.info(
+                            f"Anthropic API token usage: {input_tokens} input + {output_tokens} output = {total_tokens} total"
+                        )
+
+                    response_text = response_data["content"][0]["text"]
+
+                    # Extract JSON from response
+                    try:
+                        # Find JSON in response (might be wrapped in markdown code blocks)
+                        json_match = re.search(
+                            r"```(?:json)?\s*({.*?})\s*```", response_text, re.DOTALL
+                        )
+                        if json_match:
+                            json_str = json_match.group(1)
+                        else:
+                            # Try to find JSON without code blocks
+                            json_str = re.search(r"{.*}", response_text, re.DOTALL).group(0)
+
+                        return json.loads(json_str)
+                    except Exception as e:
+                        logger.error(f"Error parsing Claude response as JSON: {str(e)}")
+                        raise ValueError(f"Failed to parse Claude response as JSON: {str(e)}")
+                        
+            except httpx.RequestError as e:
+                # Handle network errors with retry logic
+                retry_count += 1
+                wait_time = base_wait_time * (2 ** retry_count)
+                
+                if retry_count <= max_retries:
+                    logger.warning(
+                        f"Network error when calling Anthropic API: {str(e)}. "
+                        f"Retrying in {wait_time} seconds. Attempt {retry_count}/{max_retries + 1}"
+                    )
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"Failed to connect to Anthropic API after {max_retries + 1} attempts: {str(e)}")
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"Failed to connect to Anthropic API after multiple attempts: {str(e)}"
+                    )
+        
+        # If we've exhausted all retries
+        logger.error(f"Failed to call Anthropic API after {max_retries + 1} attempts due to rate limiting")
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded when calling Anthropic API. Please try again later."
+        )
 
     async def call_openai_api(self, prompt: str) -> Dict[str, Any]:
         """
@@ -502,6 +647,10 @@ Format your response as a JSON object like this:
 
         # Save to cache
         await self.save_llm_score(article_id, result)
+        
+        # Log the total count of documents in the llm_scores collection
+        total_scores = await self.db.llm_scores.count_documents({})
+        logger.info(f"Total documents in llm_scores collection: {total_scores}")
 
         return result
 
