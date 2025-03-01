@@ -41,38 +41,42 @@ class AnthropicRateLimiter:
         self.tokens_sent = 0
         self.reset_time = time.time() + 60
         self.lock = asyncio.Lock()
-    
+
     async def check_and_wait(self, tokens: int) -> None:
         """
         Check if sending these tokens would exceed the rate limit.
         If so, wait until the next minute.
-        
+
         Args:
             tokens: Number of tokens to send
         """
         async with self.lock:
             current_time = time.time()
-            
+
             # Reset counter if a minute has passed
             if current_time >= self.reset_time:
                 self.tokens_sent = 0
                 self.reset_time = current_time + 60
                 logger.info("Anthropic rate limit counter reset")
-            
+
             # Check if adding these tokens would exceed the limit
             if self.tokens_sent + tokens > self.tokens_per_minute:
                 # Calculate wait time until reset
                 wait_time = self.reset_time - current_time
-                logger.warning(f"Anthropic API rate limit would be exceeded. Waiting {wait_time:.2f} seconds for reset.")
+                logger.warning(
+                    f"Anthropic API rate limit would be exceeded. Waiting {wait_time:.2f} seconds for reset."
+                )
                 await asyncio.sleep(wait_time)
-                
+
                 # Reset counter after waiting
                 self.tokens_sent = 0
                 self.reset_time = time.time() + 60
-            
+
             # Add tokens to counter
             self.tokens_sent += tokens
-            logger.info(f"Anthropic API tokens used in current minute: {self.tokens_sent}/{self.tokens_per_minute}")
+            logger.info(
+                f"Anthropic API tokens used in current minute: {self.tokens_sent}/{self.tokens_per_minute}"
+            )
 
 
 class LLMScoringService:
@@ -192,19 +196,27 @@ class LLMScoringService:
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     response = await client.get(
-                        "https://readwise.io/api/v3/list/", headers=headers, params=params
+                        "https://readwise.io/api/v3/list/",
+                        headers=headers,
+                        params=params,
                     )
 
                     # Handle rate limiting (429 Too Many Requests)
                     if response.status_code == 429:
-                        retry_after = int(response.headers.get("Retry-After", base_wait_time))
-                        wait_time = retry_after if retry_after else base_wait_time * (2 ** retry_count)
-                        
+                        retry_after = int(
+                            response.headers.get("Retry-After", base_wait_time)
+                        )
+                        wait_time = (
+                            retry_after
+                            if retry_after
+                            else base_wait_time * (2**retry_count)
+                        )
+
                         logger.warning(
                             f"Rate limit exceeded (429). Retrying after {wait_time} seconds. "
                             f"Attempt {retry_count + 1}/{max_retries + 1}"
                         )
-                        
+
                         await asyncio.sleep(wait_time)
                         retry_count += 1
                         continue
@@ -240,12 +252,12 @@ class LLMScoringService:
                             merged_article[field] = readwise_article[field]
 
                     return merged_article
-                    
+
             except httpx.RequestError as e:
                 # Handle network errors with retry logic
                 retry_count += 1
-                wait_time = base_wait_time * (2 ** retry_count)
-                
+                wait_time = base_wait_time * (2**retry_count)
+
                 if retry_count <= max_retries:
                     logger.warning(
                         f"Network error when calling Readwise API: {str(e)}. "
@@ -253,17 +265,21 @@ class LLMScoringService:
                     )
                     await asyncio.sleep(wait_time)
                 else:
-                    logger.error(f"Failed to fetch from Readwise API after {max_retries + 1} attempts: {str(e)}")
+                    logger.error(
+                        f"Failed to fetch from Readwise API after {max_retries + 1} attempts: {str(e)}"
+                    )
                     raise HTTPException(
                         status_code=503,
-                        detail=f"Failed to connect to Readwise API after multiple attempts: {str(e)}"
+                        detail=f"Failed to connect to Readwise API after multiple attempts: {str(e)}",
                     )
-        
+
         # If we've exhausted all retries
-        logger.error(f"Failed to fetch from Readwise API after {max_retries + 1} attempts due to rate limiting")
+        logger.error(
+            f"Failed to fetch from Readwise API after {max_retries + 1} attempts due to rate limiting"
+        )
         raise HTTPException(
             status_code=429,
-            detail="Rate limit exceeded when calling Readwise API. Please try again later."
+            detail="Rate limit exceeded when calling Readwise API. Please try again later.",
         )
 
     # Function to estimate token count (rough approximation)
@@ -442,7 +458,7 @@ Format your response as a JSON object like this:
         # Estimate token count for logging and rate limiting
         estimated_tokens = self.estimate_token_count(prompt)
         logger.info(f"Calling Anthropic API with estimated {estimated_tokens} tokens")
-        
+
         # Check rate limit and wait if necessary
         await self._anthropic_rate_limiter.check_and_wait(estimated_tokens)
 
@@ -461,19 +477,27 @@ Format your response as a JSON object like this:
             try:
                 async with httpx.AsyncClient(timeout=60.0) as client:
                     response = await client.post(
-                        "https://api.anthropic.com/v1/messages", headers=headers, json=data
+                        "https://api.anthropic.com/v1/messages",
+                        headers=headers,
+                        json=data,
                     )
 
                     # Handle rate limiting (429 Too Many Requests)
                     if response.status_code == 429:
-                        retry_after = int(response.headers.get("Retry-After", base_wait_time))
-                        wait_time = retry_after if retry_after else base_wait_time * (2 ** retry_count)
-                        
+                        retry_after = int(
+                            response.headers.get("Retry-After", base_wait_time)
+                        )
+                        wait_time = (
+                            retry_after
+                            if retry_after
+                            else base_wait_time * (2**retry_count)
+                        )
+
                         logger.warning(
                             f"Anthropic API rate limit exceeded (429). Retrying after {wait_time} seconds. "
                             f"Attempt {retry_count + 1}/{max_retries + 1}"
                         )
-                        
+
                         await asyncio.sleep(wait_time)
                         retry_count += 1
                         continue
@@ -507,18 +531,22 @@ Format your response as a JSON object like this:
                             json_str = json_match.group(1)
                         else:
                             # Try to find JSON without code blocks
-                            json_str = re.search(r"{.*}", response_text, re.DOTALL).group(0)
+                            json_str = re.search(
+                                r"{.*}", response_text, re.DOTALL
+                            ).group(0)
 
                         return json.loads(json_str)
                     except Exception as e:
                         logger.error(f"Error parsing Claude response as JSON: {str(e)}")
-                        raise ValueError(f"Failed to parse Claude response as JSON: {str(e)}")
-                        
+                        raise ValueError(
+                            f"Failed to parse Claude response as JSON: {str(e)}"
+                        )
+
             except httpx.RequestError as e:
                 # Handle network errors with retry logic
                 retry_count += 1
-                wait_time = base_wait_time * (2 ** retry_count)
-                
+                wait_time = base_wait_time * (2**retry_count)
+
                 if retry_count <= max_retries:
                     logger.warning(
                         f"Network error when calling Anthropic API: {str(e)}. "
@@ -526,17 +554,21 @@ Format your response as a JSON object like this:
                     )
                     await asyncio.sleep(wait_time)
                 else:
-                    logger.error(f"Failed to connect to Anthropic API after {max_retries + 1} attempts: {str(e)}")
+                    logger.error(
+                        f"Failed to connect to Anthropic API after {max_retries + 1} attempts: {str(e)}"
+                    )
                     raise HTTPException(
                         status_code=503,
-                        detail=f"Failed to connect to Anthropic API after multiple attempts: {str(e)}"
+                        detail=f"Failed to connect to Anthropic API after multiple attempts: {str(e)}",
                     )
-        
+
         # If we've exhausted all retries
-        logger.error(f"Failed to call Anthropic API after {max_retries + 1} attempts due to rate limiting")
+        logger.error(
+            f"Failed to call Anthropic API after {max_retries + 1} attempts due to rate limiting"
+        )
         raise HTTPException(
             status_code=429,
-            detail="Rate limit exceeded when calling Anthropic API. Please try again later."
+            detail="Rate limit exceeded when calling Anthropic API. Please try again later.",
         )
 
     async def call_openai_api(self, prompt: str) -> Dict[str, Any]:
@@ -647,7 +679,7 @@ Format your response as a JSON object like this:
 
         # Save to cache
         await self.save_llm_score(article_id, result)
-        
+
         # Log the total count of documents in the llm_scores collection
         total_scores = await self.db.llm_scores.count_documents({})
         logger.info(f"Total documents in llm_scores collection: {total_scores}")
