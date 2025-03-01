@@ -29,7 +29,7 @@ def score_article(article_id: str, use_cached: bool = True) -> Dict[str, Any]:
     return response.json()
 
 
-def batch_score(limit: int = 10) -> Dict[str, Any]:
+def batch_score(limit: int = 20) -> Dict[str, Any]:
     """
     Use the batch scoring endpoint to score multiple articles.
 
@@ -62,7 +62,7 @@ if __name__ == "__main__":
 
     # Example usage for batch scoring
     try:
-        batch_results = batch_score(limit=5)
+        batch_results = batch_score(limit=50)
         articles_scored = batch_results.get(
             "articles_scored", 0
         )  # This is an integer, not a list
