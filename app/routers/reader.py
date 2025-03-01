@@ -542,7 +542,7 @@ async def get_curated_later_articles(db: AsyncIOMotorDatabase = Depends(get_data
 @router.get("/stats")
 async def get_stats(
     days: int = Query(
-        default=7, ge=1, le=30, description="Number of days to look back"
+        default=90, ge=1, le=366, description="Number of days to look back"
     ),
     db: AsyncIOMotorDatabase = Depends(get_database),
 ):
