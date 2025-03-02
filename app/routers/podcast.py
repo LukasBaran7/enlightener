@@ -131,7 +131,8 @@ class PodcastService:
                 key=lambda x: parse_date(x[0].last_played_at),
                 reverse=True,
             )
-            latest_episodes = all_episodes[:50]
+            # Return all episodes instead of limiting to 50
+            latest_episodes = all_episodes
 
             # Group episodes by podcast
             podcast_map = {}
@@ -159,7 +160,7 @@ def get_podcast_service(
 
 @router.get("/latest", response_model=List[Podcast])
 async def get_latest_episodes(service: PodcastService = Depends(get_podcast_service)):
-    """Get the 50 most recently played episodes grouped by podcast"""
+    """Get all played episodes grouped by podcast, sorted by most recently played"""
     try:
         return await service.get_latest_episodes()
     except Exception as e:
